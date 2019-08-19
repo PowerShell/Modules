@@ -11,7 +11,7 @@ RootModule = '.\Microsoft.PowerShell.SecretsManagement.dll'
 ModuleVersion = '1.0.0'
 
 # Supported PSEditions
-# CompatiblePSEditions = @()
+CompatiblePSEditions = @('Core')
 
 # ID used to uniquely identify this module
 GUID = '766a9266-f2ba-4146-bec2-bb30bf5a4f0a'
@@ -34,7 +34,7 @@ for use in managing and retrieving secrets.
 "
 
 # Minimum version of the PowerShell engine required by this module
-# PowerShellVersion = ''
+PowerShellVersion = '5.1'
 
 # Name of the PowerShell host required by this module
 # PowerShellHostName = ''
@@ -99,7 +99,7 @@ PrivateData = @{
         # Tags = @()
 
         # A URL to the license for this module.
-        LicenseUri = 'https://github.com/PaulHigin/Modules/License.txt'
+        LicenseUri = 'https://github.com/PowerShell/Modules/License.txt'
 
         # A URL to the main website for this project.
         # ProjectUri = ''
