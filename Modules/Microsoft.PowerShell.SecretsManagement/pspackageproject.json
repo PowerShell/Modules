@@ -1,0 +1,8 @@
+{
+  "ModuleName": "Microsoft.PowerShell.SecretsManagement",
+  "Culture": "en-US",
+  "BuildOutputPath": "out",
+  "HelpPath": "help",
+  "TestPath": "test",
+  "SourcePath": "src"
+}
