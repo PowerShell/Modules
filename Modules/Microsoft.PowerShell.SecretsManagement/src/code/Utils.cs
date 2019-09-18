@@ -1231,4 +1231,13 @@ namespace Microsoft.PowerShell.SecretsManagement
     }
 
     #endregion
+
+    #region Utils
+
+    internal static class Utils
+    {
+        // TODO: Implement.
+    }
+
+    #endregion
 }

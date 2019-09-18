@@ -1,143 +1,338 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Management.Automation;
 
 namespace Microsoft.PowerShell.SecretsManagement
 {
-
-    #region Register-LocalSecretsVault
+    #region Extension vault module class
 
     /// <summary>
-    /// Cmdlet to register a local secrets vaults provider module
+    /// Class that contains all vault module information and secret manipulation methods.
     /// </summary>
-    [Cmdlet(VerbsLifecycle.Register, "LocalSecretsVault")]
-    public sealed class RegisterLocalSecretsVaultCommand : PSCmdlet
+    internal class ExtensionVaultModule
     {
-        #region Parameters
+        //
+        // Default commands:
+        //
+        //  # Retrieve secret object from vault and write to output
+        //  Get-Secret (required)
+        //      [string] $Name
+        //
+        //  # Add secret object to vault.
+        //  Set-Secret (optional)
+        //      [string] $Name
+        //      [PSObject] $secret
+        //
+        //  # Remove secret object from vault.
+        //  Remove-Secret (optional)
+        //      [string] $Name
+        //
 
-        /// <summary>
-        /// Gets or sets a name for the registered local secrets vault.
-        /// </summary>
-        [Parameter(Mandatory=true)]
-        [ValidateNotNullOrEmpty]
-        public string Name { get; set; }
+        #region Members
 
-        /// <summary>
-        /// Gets or sets a name of a secrets vault extension module to register.
-        /// </summary>
-        [Parameter(Mandatory=true)]
-        [ValidateNotNullOrEmpty]
-        public string Module { get; set; }
+        #region Strings
 
-        /// <summary>
-        /// Gets or sets a ScriptBlock used to retrieve a secret from the registered vault.
-        /// Note: We can only store the ScriptBlock text, and this means we will need to have an internal
-        ///       API that creates a ScriptBlock from an untrusted source, which in turn means that the
-        ///       ScriptBlock is created in CL mode on locked down systems.
-        /// Example:
-        ///     {
-        ///         param ([string] $Name)
-        ///
-        ///         Get-CredVaultSecret $Name
-        ///     }
-        /// </summary>
-        [Parameter(Mandatory=true)]
-        [ValidateNotNull]
-        public ScriptBlock SecretGetScript { get; set; }
+        private const string DefaultSecretGetCmd = "Get-Secret";
+        private const string DefaultSecretSetCmd = "Set-Secret";
+        private const string DefaultSecretRemoveCmd = "Remove-Secret";
 
-        /// <summary>
-        /// Gets or sets a Hashtable of optional parameters to the registered vault extension module 
-        /// script used to retrieve secrets from the vault.
-        /// Note: This may contain sensitive information, and so should be stored in (default?) local vault.
-        ///  Example:
-        ///    -Parameters @{
-        ///         Name = "MySecret1"
-        ///         SubscriptionId = "6072e8a0-4a33-4258-b158-18e2deec00fc"
-        ///         TenantId = "f283eb39-32fb-4ed8-8baa-811295542bc3"
-        ///         AccessToken = "1bcb7a72-579c-4f9c-a789-755d0e51ba0e"
-        ///    }
-        /// </summary>
-        [Parameter]
-        public Hashtable SecretGetParameters { get; set; }
+        private const string ModuleNameStr = "ModuleName";
+        private const string ModulePathStr = "ModulePath";
+        private const string SecretGetScriptStr = "SecretGetScript";
+        private const string SecretGetParamsStr = "SecretGetParams";
+        private const string SecretSetScriptStr = "SecretSetScript";
+        private const string SecretSetParamsStr = "SecretSetParams";
+        private const string SecretRemoveScriptStr = "SecretRemoveScript";
+        private const string SecretRemoveParamsStr = "SecretRemoveParams";
+        private const string HaveDefaultGetStr = "HaveDefaultGet";
+        private const string HaveDefaultSetStr = "HaveDefaultSet";
+        private const string HaveDefaultRemoveStr = "HaveDefaultRemove";
 
-        /// <summary>
-        /// Gets or sets a ScriptBlock used to add a secret to the registered local secrets vault.
-        /// Example:
-        ///     {
-        ///         param([string] $Name, [object] $Secret)
-        ///
-        ///         Set-CredVaultSecret $Name $Secret
-        ///     }
-        /// </summary>
-        [Parameter(Mandatory=true)]
-        [ValidateNotNullOrEmpty]
-        public ScriptBlock SecretAddScript { get; set; }
+        private const string RunCommandScript = @"
+            param(
+                [string] $ModulePath,
+                [string] $ModuleName,
+                [string] $CommandName,
+                [hashtable] $Params
+            )
 
-        /// <summary>
-        /// Gets or sets a Hashtable of optional parameters to the registered vault extension module
-        /// script used to retrieve secrets from the vault.
-        /// Note: This may contain sensitive information, and so should be stored in (default?) local vault.
-        /// Example:
-        ///    -Parameters @{
-        ///         Name = "MySecret1"
-        ///         SubscriptionId = "6072e8a0-4a33-4258-b158-18e2deec00fc"
-        ///         TenantId = "f283eb39-32fb-4ed8-8baa-811295542bc3"
-        ///         AccessToken = "1bcb7a72-579c-4f9c-a789-755d0e51ba0e"
-        ///    }
-        /// </summary>
-        [Parameter]
-        public Hashtable SecretAddParameters { get; set; }
+            Import-Module -Name $ModuleName
 
-        /// <summary>
-        /// Gets or sets a flag indicating that the local secrets vault should be registered and override
-        /// existing local secrets vault, without confirmation.
-        /// </summary>
-        [Parameter]
-        public SwitchParameter Force { get; set; }
+            & ""$ModuleName\$CommandName"" @Params
+        ";
+
+        private const string RunScriptScript = @"
+            param (
+                [ScriptBlock] $sb,
+                [hashtable] $Params
+            )
+
+            if ($Params -ne $null)
+            {
+                & $sb @Params
+            }
+            else
+            {
+                & $sb
+            }
+        ";
 
         #endregion
 
-        #region Overrides
+        private readonly bool _haveDefaultGetCommand;
+        private readonly bool _haveDefaultSetCommand;
+        private readonly bool _haveDefaultRemoveCommand;
+        private ScriptBlock _GetSecretScriptBlock;
+        private ScriptBlock _SetSecretScriptBlock;
+        private ScriptBlock _RemoveSecretScriptBlock;
 
-        protected override void EndProcessing()
+        #endregion
+
+        #region Properties
+
+        /// <summary>
+        /// Module name to qualify module commands.
+        /// </summary>
+        public string ModuleName { get; }
+
+        /// <summary>
+        /// Module path.
+        /// </summary>
+        public string ModulePath { get; }
+
+        /// <summary>
+        /// Optional script to get secret from vault.
+        /// <summary>
+        public string SecretGetScript { get; }
+
+        /// <summary>
+        /// Optional local store name for get secret script parameters.
+        /// <summary>
+        public string SecretGetParamsName { get; }
+
+        /// <summary>
+        /// Optional script to add secret to vault.
+        /// </summary>
+        public string SecretSetScript { get; }
+
+        /// <summary>
+        /// Optional local store name for set secret script parameters.
+        /// <summary>
+        public string SecretSetParamsName { get; }
+
+        /// <summary>
+        /// Optional script to remove secret from vault.
+        /// </summary>
+        public string SecretRemoveScript { get; }
+
+        /// <summary>
+        /// Optional local store name for remove secret script parameters.
+        /// </summary>
+        public string SecretRemoveParamsName { get; }
+
+        #endregion
+
+        #region Constructor
+
+        private ExtensionVaultModule() { }
+
+        /// <summary>
+        /// Initializes a new instance of ExtensionVaultModule
+        /// </summary>
+        public ExtensionVaultModule(Hashtable vaultInfo)
         {
-            // TODO:
-            // Read user registration data
-            // Check for vault extension name conflict
-            // Validate default local store (platform specific)
-            // Generate local vault keys
-            // Update registration data
-            // Perform 'Should Process' unless -Force was selected
-            // Write script and parameter data to local vault
-            //   Write script block text
-            //   Write parameter hash table as blob?  Or serialized text?
-            //      Remove on failure (need transaction semantics)
-            // Open registration file exclusively
-            // Write data
-            //      Update PowerShell object to take 'untrusted input'
-            //      Find out how to access credman via C# (PInvoke?)
-            //          ** Need to create PInvoke API for CredWriteA() and CredReadA() APIs (Windows only) **
-            //          ** Experiment with writing/reading scriptblock and param dictionary. **
-            //      Add support for Linux (Gnome Keyring)
+            // Required module information.
+            ModuleName = (string) vaultInfo[ModuleNameStr];
+            ModulePath = (string) vaultInfo[ModulePathStr];
+            _haveDefaultGetCommand = (bool) vaultInfo[HaveDefaultGetStr];
+            _haveDefaultSetCommand = (bool) vaultInfo[HaveDefaultSetStr];
+            _haveDefaultRemoveCommand = (bool) vaultInfo[HaveDefaultRemoveStr];
+
+            // Optional Get-Secret script block.
+            SecretGetScript = (vaultInfo.ContainsKey(SecretGetScriptStr)) ?
+                (string) vaultInfo[SecretGetScriptStr] : string.Empty;
+            SecretGetParamsName = (vaultInfo.ContainsKey(SecretGetParamsStr)) ?
+                (string) (string) vaultInfo[SecretGetParamsStr] : string.Empty;
+
+            // Optional Set-Secret script block.
+            SecretSetScript = (vaultInfo.ContainsKey(SecretSetScriptStr)) ?
+                (string) vaultInfo[SecretSetScriptStr] : string.Empty;
+            SecretSetParamsName = (vaultInfo.ContainsKey(SecretSetParamsStr)) ?
+                (string) vaultInfo[SecretSetParamsStr] : string.Empty;
+
+            // Optional Remove-Secret script block.
+            SecretRemoveScript = (vaultInfo.ContainsKey(SecretRemoveScriptStr)) ?
+                (string) vaultInfo[SecretRemoveScriptStr] : string.Empty;
+            SecretRemoveParamsName = (vaultInfo.ContainsKey(SecretRemoveParamsStr)) ?
+                (string) vaultInfo[SecretRemoveParamsStr] : string.Empty;
         }
 
         #endregion
 
+        #region Public methods
+
+        /// <summary>
+        /// Invokes module command to get secret from this vault.
+        /// Output is sent to cmdlet pipe.
+        /// <summary>
+        /// <param name="cmdlet">PowerShell cmdlet to invoke module command on.</param>
+        /// <param name="name">Name of secret to get</param>
+        public void InvokeGetSecret(
+            PSCmdlet cmdlet,
+            string name)
+        {
+            Hashtable parameters = null;
+
+            if (_haveDefaultGetCommand)
+            {
+                parameters = new Hashtable() {
+                    { "Name", name }
+                };
+
+                cmdlet.InvokeCommand.InvokeScript(
+                    RunCommandScript,
+                    new object[] { ModulePath, ModuleName, DefaultSecretGetCmd, parameters });
+
+                return;
+            }
+
+            // Get stored script parameters if provided.
+            parameters = GetParamsFromStore(SecretGetParamsName);
+
+            // Use provided secret get script.
+            if (_GetSecretScriptBlock == null)
+            {
+                // TODO: !! Add support for creation of *untrusted* script block. !!
+                _GetSecretScriptBlock = ScriptBlock.Create(SecretGetScript);
+            }
+
+            cmdlet.InvokeCommand.InvokeScript(
+                RunScriptScript,
+                new object[] { _GetSecretScriptBlock, parameters });
+        }
+
+        /// <summary>
+        /// Invokes module command to add a secret to this vault.
+        /// </summary>
+        /// <param name="cmdlet">PowerShell cmdlet to invoke module command on.</param>
+        /// <param name="name">Name of secret to add.</param>
+        /// <param name="secret">Secret object to ad to vault.</param>
+        public void InvokeSetSecret(
+            PSCmdlet cmdlet,
+            string name,
+            PSObject secret)
+        {
+            Hashtable parameters = null;
+
+            if (_haveDefaultSetCommand)
+            {
+                parameters = new Hashtable() {
+                    { "Name", name },
+                    { "Secret", secret }
+                };
+
+                cmdlet.InvokeCommand.InvokeScript(
+                    RunCommandScript,
+                    new object[] { ModulePath, ModuleName, DefaultSecretSetCmd, parameters });
+
+                return;
+            }
+
+            // Get stored script parameters if provided.
+            parameters = GetParamsFromStore(SecretSetParamsName);
+
+            // Use provided secret get script.
+            if (_SetSecretScriptBlock == null)
+            {
+                // TODO: !! Add support for creation of *untrusted* script block. !!
+                _SetSecretScriptBlock = ScriptBlock.Create(SecretSetScript);
+            }
+
+            cmdlet.InvokeCommand.InvokeScript(
+                RunScriptScript,
+                new object[] { _SetSecretScriptBlock, parameters });
+        }
+
+        /// <summary>
+        /// Invokes module command to remove a secret from this vault.
+        /// </summary>
+        /// <param name="cmdlet">PowerShell cmdlet to invoke module command on.</param>
+        /// <param name="name">Name of secret to remove.</param>
+        public void InvokeRemoveSecret(
+            PSCmdlet cmdlet,
+            string name)
+        {
+            Hashtable parameters = null;
+
+            if (_haveDefaultRemoveCommand)
+            {
+                parameters = new Hashtable() {
+                    { "Name", name }
+                };
+
+                cmdlet.InvokeCommand.InvokeScript(
+                    RunCommandScript,
+                    new object[] { ModulePath, ModuleName, DefaultSecretRemoveCmd, parameters });
+
+                return;
+            }
+
+            // Get stored script parameters if provided.
+            parameters = GetParamsFromStore(SecretRemoveParamsName);
+
+            // Use provided secret get script.
+            if (_RemoveSecretScriptBlock == null)
+            {
+                // TODO: !! Add support for creation of *untrusted* script block. !!
+                _RemoveSecretScriptBlock = ScriptBlock.Create(SecretSetScript);
+            }
+
+            cmdlet.InvokeCommand.InvokeScript(
+                RunScriptScript,
+                new object[] { _RemoveSecretScriptBlock, parameters });
+        }
+
+        #endregion
+
+        #region Private methods
+
+        private static Hashtable GetParamsFromStore(string paramsName)
+        {
+            Hashtable parameters = null;
+            if (!string.IsNullOrEmpty(paramsName))
+            {
+                // TODO: Refactor default store to provider agnostic API.
+                int errorCode = 0;
+                if (CredMan.ReadObject(
+                    paramsName,
+                    out object outObject,
+                    ref errorCode))
+                {
+                    parameters = outObject as Hashtable;
+                }
+            }
+
+            return parameters;
+        }
+
+        #endregion
     }
 
     #endregion
 
-    #region Register-RemoteSecretsVault
+    #region Register-SecretsVault
 
     /// <summary>
     /// Cmdlet to register a remote secrets vaults provider module
     /// </summary>
-    [Cmdlet(VerbsLifecycle.Register, "RemoteSecretsVault")]
-    public sealed class RegisterRemoteSecretsVaultCommand : PSCmdlet
+    [Cmdlet(VerbsLifecycle.Register, "SecretsVault")]
+    public sealed class RegisterSecretsVaultCommand : PSCmdlet
     {
         #region Parameters
 
@@ -145,56 +340,254 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// Gets or sets a friendly name for the registered secrets vault.
         /// The name must be unique.
         /// </summary>
-        [Parameter(Mandatory=true)]
+        [Parameter(Position=0, Mandatory=true)]
         [ValidateNotNullOrEmpty]
         public string Name { get; set; }
 
         /// <summary>
-        /// Gets or sets a name of a secrets vault extension module to register.
+        /// Gets or sets the path of the vault extension module to register.
         /// </summary>
-        [Parameter(Mandatory=true)]
+        [Parameter(Position=1, Mandatory=true)]
         [ValidateNotNullOrEmpty]
-        public string Module { get; set; }
+        public string ModulePath { get; set; }
 
         /// <summary>
-        /// Gets or sets a ScriptBlock used to retrieve a secret from the registered vault.
+        /// Gets or sets an optional ScriptBlock used to retrieve a secret from the registered vault.
         /// Note: We can only store the ScriptBlock text, and this means we will need to have an internal
         ///       API that creates a ScriptBlock from an untrusted source, which in turn means that the
         ///       ScriptBlock is created in CL mode on locked down systems.
-        /// Example:
-        ///     {
-        ///         param ([string] $Name)
-        ///
-        ///         Get-AzSecret $Name
-        ///     }
         /// </summary>
-        [Parameter(Mandatory=true)]
+        [Parameter]
         [ValidateNotNull]
         public ScriptBlock SecretGetScript { get; set; }
 
         /// <summary>
-        /// Gets or sets a Hashtable of optional parameters to the registered vault extension module 
+        /// Gets or sets an optional Hashtable of parameters to the registered vault extension module 
         /// script used to retrieve secrets from the vault.
         /// Note: This may contain sensitive information, and so should be stored in local vault.
-        /// Question: How is this information updated?
-        ///  Example:
-        ///    -Parameters @{
-        ///         Name = "MySecret1"
-        ///         SubscriptionId = "6072e8a0-4a33-4258-b158-18e2deec00fc"
-        ///         TenantId = "f283eb39-32fb-4ed8-8baa-811295542bc3"
-        ///         AccessToken = "1bcb7a72-579c-4f9c-a789-755d0e51ba0e"
-        ///    }
         /// </summary>
         [Parameter]
         public Hashtable SecretGetParameters { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional ScriptBlock used to add a secret to the registered vault.
+        /// Note: Add script block text only and convert to ScriptBlock (safely) as needed.
+        /// </summary>
+        [Parameter]
+        [ValidateNotNull]
+        public ScriptBlock SecretSetScript { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional Hashtable of parameters to the registered vault extension module
+        /// script used to add secrets to the vault.
+        /// </summary>
+        [Parameter]
+        public Hashtable SecretSetParameters { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional ScriptBlock used to remove a secret from the registered vault.
+        /// </summary>
+        [Parameter]
+        [ValidateNotNull]
+        public ScriptBlock SecretRemoveScript { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional Hashtable of parameters to the registered vault extension module
+        /// script used to remove secrets from the vault.
+        /// </summary>
+        [Parameter]
+        public Hashtable SecretRemoveParameters { get; set; }
+
+        #endregion
+
+        #region Members
+
+        private const string ConvertJsonToHashtableScript = @"
+            param (
+                [string] $json
+            )
+
+            function ConvertToHash
+            {
+                param (
+                    [pscustomobject] $object
+                )
+
+                $output = @{}
+                $object | Get-Member -MemberType NoteProperty | ForEach-Object {
+                    $name = $_.Name
+                    $value = $object.($name)
+
+                    if ($value -is [object[]])
+                    {
+                        $array = @()
+                        $value | ForEach-Object {
+                            $array += (ConvertToHash $_)
+                        }
+                        $output.($name) = $array
+                    }
+                    elseif ($value -is [pscustomobject])
+                    {
+                        $output.($name) = (ConvertToHash $value)
+                    }
+                    else
+                    {
+                        $output.($name) = $value
+                    }
+                }
+
+                $output
+            }
+
+            $customObject = ConvertFrom-Json $json
+            return ConvertToHash $customObject
+        ";
+
+        #endregion
+
+        #region Properties
+
+        private static string SecretsRegistryFilePath
+        {
+            get
+            {
+                return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + 
+                    @"\Microsoft\Windows\PowerShell\SecretVaultRegistry";
+            }
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        private Hashtable ConvertJsonToHashtable(string json)
+        {
+            var psObject = this.InvokeCommand.InvokeScript(
+                script: ConvertJsonToHashtableScript,
+                args: new object[] { json });
+
+            return psObject[0].BaseObject as Hashtable;
+        }
+
+        /// <summary>
+        /// Reads the current user secret vault registry information from file.
+        /// </summary>
+        /// <returns>Hashtable containing registered vault information.</returns>
+        private Hashtable ReadSecretVaultRegistry()
+        {
+            if (!File.Exists(SecretsRegistryFilePath))
+            {
+                return null;
+            }
+
+            string jsonInfo = File.ReadAllText(SecretsRegistryFilePath);
+            return ConvertJsonToHashtable(jsonInfo);
+        }
+
+        /// <summary>
+        /// Writes the Hashtable registered vault information data to file as json.
+        /// </summary>
+        /// <param>Hashtable containing registered vault information.</param>
+        private void WriteSecretVaultRegistry(Hashtable dataToWrite)
+        {
+            var psObject = this.InvokeCommand.InvokeScript(@"param ([hashtable] $dataToWrite) ConvertTo-Json $dataToWrite", new object[] { dataToWrite });
+            string jsonInfo = psObject[0].BaseObject as string;
+            File.WriteAllText(SecretsRegistryFilePath, jsonInfo);
+        }
 
         #endregion
 
         #region Overrides
 
-        protected override void ProcessRecord()
+        protected override void EndProcessing()
         {
-            // TODO: 
+            // Load module (Get-Module -List ?, but no parameters)
+            // Get module (full) name
+            // Get module exported commands
+            // Verify commands (or equivalent script blocks):
+            //  Add-Secret
+            //      [-Name] <string>
+            //      [-Secret] <psobject>
+            //  Get-Secret
+            //      [-Name] <string>
+            //  Remove-Secret
+            //      [-Name] <string>
+            //
+            // Run 'Should Process', or skip if -Force
+            //  Read json database file (convert to hashtable)
+            //  Replace single default entry with new
+            //  Write file
+
+            // TODO:  !!Test only!!
+            var testInfoJson = @"
+            {
+                ""RemoteVault2"": {
+                    ""ModuleName"": ""Module.RemoteVault2"",
+                    ""ModulePath"": ""c:\\temp\\Modules\\Module.RemoteVault2\\Module.RemoteVault2.psd1"",
+                    ""HaveDefaultGet"": true,
+                    ""HaveDefaultSet"": false,
+                    ""HaveDefaultRemove"": false
+                },
+                ""LocalVault1"": {
+                    ""ModuleName"": ""Module.LocalVault1"",
+                    ""ModulePath"": ""c:\\temp\\Modules\\Module.LocalVault1\\Module.LocalVault1.psd1"",
+                    ""SecretGetScript"": ""Module.LocalVault1\\Get-Secret @Params"",
+                    ""SecretGetParams"": {
+                        ""Verification"": ""SecretValue"",
+                        ""AccountName"": ""SomeAccount""
+                    },
+                    ""SecretSetScript"": ""Module.LocalVault1\\Set-Secret @Params"",
+                    ""SecretSetParams"": {
+                        ""Verification"": ""SecretValue"",
+                        ""AccountName"": ""SomeAccount""
+                    },
+                    ""SecretRemoveScript"": ""Module.LocalVault1\\Remove-Secret @Params"",
+                    ""SecretRemoveParams"": {
+                        ""Verification"": ""SecretValue"",
+                        ""AccountName"": ""SomeAccount""
+                    },
+                    ""HaveDefaultGet"": false,
+                    ""HaveDefaultSet"": false,
+                    ""HaveDefaultRemove"": false
+                },
+                ""RemoteVault1"": {
+                    ""ModuleName"": ""Module.RemoteVault1"",
+                    ""ModulePath"": ""c:\\temp\\Modules\\Module.RemoteVault1\\Module.RemoteVault1.psd1"",
+                    ""SecretGetScript"": ""Module.RemoteVault1\\Get-Secret @Params"",
+                    ""SecretGetParams"": {
+                        ""Verification"": ""SecretValue"",
+                        ""AccountName"": ""SomeAccount""
+                    },
+                    ""HaveDefaultGet"": false,
+                    ""HaveDefaultSet"": false,
+                    ""HaveDefaultRemove"": false
+                },
+                ""LocalVault2"": {
+                    ""ModuleName"": ""Module.LocalVault2"",
+                    ""ModulePath"": ""c:\\temp\\Modules\\Module.LocalVault2\\Module.LocalVault2.psd1"",
+                    ""SecretGetScript"": ""Module.LocalVault2\\Get-Secret @Params"",
+                    ""SecretGetParams"": {
+                        ""Verification"": ""SecretValue"",
+                        ""AccountName"": ""SomeAccount""
+                    },
+                    ""SecretSetScript"": ""Module.LocalVault2\\Set-Secret @Params"",
+                    ""SecretSetParams"": {
+                        ""Verification"": ""SecretValue"",
+                        ""AccountName"": ""SomeAccount""
+                    },
+                    ""HaveDefaultGet"": false,
+                    ""HaveDefaultSet"": false,
+                    ""HaveDefaultRemove"": false
+                }
+            }
+            ";
+
+            var hashtable = ConvertJsonToHashtable(testInfoJson);
+            WriteObject(hashtable);
+
+            WriteSecretVaultRegistry(hashtable);
+            var readHashtable = ReadSecretVaultRegistry();
+            WriteObject(readHashtable);
         }
 
         #endregion
