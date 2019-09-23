@@ -4,7 +4,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
 using System.Management.Automation;
 using System.Runtime.InteropServices;
 using System.Security;
@@ -14,10 +16,11 @@ using Dbg = System.Diagnostics.Debug;
 
 namespace Microsoft.PowerShell.SecretsManagement
 {
+#if !UNIX
     #region CredMan
 
     /// <summary>
-    /// Native method PInvokes
+    /// Windows Credential Manager (CredMan) native method PInvokes.
     /// </summary>
     internal static class NativeUtils
     {
@@ -189,9 +192,9 @@ namespace Microsoft.PowerShell.SecretsManagement
     }
 
     /// <summary>
-    /// Windows Credential Manager APIs
+    /// Default local secret store
     /// </summary>
-    internal static class CredMan
+    internal static class LocalSecretStore
     {
         #region Members
 
@@ -209,8 +212,6 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Public methods
 
-        #region Vault methods
-
         //
         // Vault methods currently only support the following types
         //
@@ -224,7 +225,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         //
 
         /// <summary>
-        /// Writes an object to the CredMan vault for the current logged on user.
+        /// Writes an object to the local secret vault for the current logged on user.
         /// </summary>
         /// <param name="name">Name of object to write.</param>
         /// <param name="objectToWrite">Object to write to vault.</param>
@@ -285,7 +286,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         }
 
         /// <summary>
-        /// Reads an object from the CredMan vault for the current logged on user.
+        /// Reads an object from the local secret vault for the current logged on user.
         /// </summary>
         /// <param name="name">Name of object to read from vault.</param>
         /// <param name="outObject">Object read from vault.</param>
@@ -340,6 +341,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 
                 case HashtableType:
                     return ReadHashtable(
+                        name,
                         outBlob,
                         out outObject,
                         ref errorCode);
@@ -353,15 +355,20 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// Enumerate objects in the vault, based on the filter string, for the current user.
         /// <summary>
         /// <param name="filter">String with '*' wildcard that determins which objects to return.</param>
+        /// <param name="all">Lists all objects in store without the prepended tag.</param>
         /// <param name="outObjects">Array of key/value pairs for each returned object.</param>
         /// <param name="errorCode">Error code or zero.</param>
         /// <returns>True when objects are found and returned.</returns>
         public static bool EnumerateObjects(
             string filter,
+            bool all,
             out KeyValuePair<string, object>[] outObjects,
             ref int errorCode)
         {
-            filter = PrependTag(filter);
+            if (!all)
+            {
+                filter = PrependTag(filter);
+            }
 
             if (!EnumerateBlobs(
                 filter,
@@ -417,6 +424,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                     case HashtableType:
                         if (ReadHashtable(
+                            item.Name,
                             item.Data,
                             out object hashtable,
                             ref errorCode))
@@ -444,12 +452,30 @@ namespace Microsoft.PowerShell.SecretsManagement
             string name,
             ref int errorCode)
         {
-            return DeleteBlob(
-                PrependTag(name),
-                ref errorCode);
-        }
+            // Hash tables are complex and require special processing.
+            if (!ReadObject(
+                name,
+                out object outObject,
+                ref errorCode))
+            {
+                return false;
+            }
 
-        #endregion
+            name = PrependTag(name);
+
+            switch (outObject)
+            {
+                case Hashtable hashtable:
+                    return DeleteHashtable(
+                        name,
+                        ref errorCode);
+
+                default:
+                    return DeleteBlob(
+                        name,
+                        ref errorCode);
+            }
+        }
 
         /// <summary>
         /// Returns an error message based on provided error code.
@@ -520,6 +546,20 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             return str;
+        }
+
+        private static string PrependHTTag(
+            string hashName,
+            string keyName)
+        {
+            return PSHashtableTag + hashName + keyName;
+        }
+
+        private static string RecoverKeyname(
+            string str,
+            string hashName)
+        {
+            return str.Substring((PSHashtableTag + hashName).Length);
         }
 
         private static bool GetSecureStringFromData(
@@ -1093,7 +1133,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     entryType == typeof(SecureString) ||
                     entryType == typeof(PSCredential))
                 {
-                    var entryName = PSHashtableTag + key;
+                    var entryName = PrependHTTag(name, key.ToString());
                     entries.Add(entryName, entry);
                 }
                 else
@@ -1153,7 +1193,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     }
 
                     // Remove the Hashtable member names.
-                    DeleteObject(
+                    DeleteBlob(
                         name: name,
                         ref error);
                 }
@@ -1161,6 +1201,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         }
 
         private static bool ReadHashtable(
+            string name,
             byte[] blob,
             out object outHashtable,
             ref int errorCode)
@@ -1183,7 +1224,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
 
                 hashtable.Add(
-                    entryName.Substring(PSHashtableTag.Length),
+                    RecoverKeyname(entryName, name),
                     outObject);
             }
 
@@ -1191,13 +1232,13 @@ namespace Microsoft.PowerShell.SecretsManagement
             return true;
         }
 
-        public static bool DeleteHashtable(
+        private static bool DeleteHashtable(
             string name,
             ref int errorCode)
         {
             // Get array of Hashtable secret names.
             if (!ReadBlob(
-                PrependTag(name),
+                name,
                 out byte[] blob,
                 out string typeName,
                 ref errorCode))
@@ -1218,7 +1259,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             // Delete the Hashtable secret names list.
-            DeleteObject(
+            DeleteBlob(
                 name: name,
                 ref errorCode);
 
@@ -1231,12 +1272,216 @@ namespace Microsoft.PowerShell.SecretsManagement
     }
 
     #endregion
+#else
+    #region Keyring
 
-    #region Utils
+    // TODO: Implement via Gnome Keyring
 
-    internal static class Utils
+    #endregion
+#endif
+
+    #region RegisteredVaultCache
+
+    internal static class RegisteredVaultCache
     {
-        // TODO: Implement.
+        #region Members
+
+        #region Strings
+
+        private const string ConvertJsonToHashtableScript = @"
+            param (
+                [string] $json
+            )
+
+            function ConvertToHash
+            {
+                param (
+                    [pscustomobject] $object
+                )
+
+                $output = @{}
+                $object | Get-Member -MemberType NoteProperty | ForEach-Object {
+                    $name = $_.Name
+                    $value = $object.($name)
+
+                    if ($value -is [object[]])
+                    {
+                        $array = @()
+                        $value | ForEach-Object {
+                            $array += (ConvertToHash $_)
+                        }
+                        $output.($name) = $array
+                    }
+                    elseif ($value -is [pscustomobject])
+                    {
+                        $output.($name) = (ConvertToHash $value)
+                    }
+                    else
+                    {
+                        $output.($name) = $value
+                    }
+                }
+
+                $output
+            }
+
+            $customObject = ConvertFrom-Json $json
+            return ConvertToHash $customObject
+        ";
+
+        private static readonly string RegistryDirectoryPath =  Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + 
+            @"\Microsoft\Windows\PowerShell\SecretVaultRegistry";
+
+        private static readonly string RegistryFilePath = RegistryDirectoryPath + @"\VaultInfo";
+
+        #endregion
+
+        private static Hashtable _vaultCache;
+        private static FileSystemWatcher _registryWatcher;
+        private static System.Management.Automation.PowerShell _powershell = System.Management.Automation.PowerShell.Create();
+
+        #endregion
+
+        #region Constructor
+
+        static RegisteredVaultCache()
+        {
+            // Verify path or create.
+            // TODO: How to handle IO errors...
+            if (!Directory.Exists(RegistryDirectoryPath))
+            {
+                Directory.CreateDirectory(RegistryDirectoryPath);
+            }
+
+            // Create vault cache.
+            _vaultCache = new Hashtable();
+
+            // Create file watcher.
+            _registryWatcher = new FileSystemWatcher(RegistryDirectoryPath);
+            _registryWatcher.NotifyFilter = NotifyFilters.LastWrite;
+            _registryWatcher.Filter = "VaultInfo";
+            _registryWatcher.EnableRaisingEvents = true;
+            _registryWatcher.Changed += (sender, args) => RefreshCache();
+
+            RefreshCache();
+        }
+
+        #endregion
+
+        #region Public methods
+
+        /// <summary>
+        /// Retrieve all vault items from cache.
+        /// </summary>
+        /// <returns>Hashtable of vault items.</returns>
+        public static Hashtable GetAll()
+        {
+            lock (_vaultCache)
+            {
+                var vaultItems = (Hashtable) _vaultCache.Clone();
+                return vaultItems;
+            }
+        }
+
+        /// <summary>
+        /// Add item to cache.
+        /// </summary>
+        /// <param name="vaultInfo">Hashtable of vault information.</param>
+        /// <returns>True when item is successfully added.</returns>
+        public static bool Add(
+            string keyName,
+            Hashtable vaultInfo)
+        {
+            var vaultItems = GetAll();
+            if (!vaultItems.ContainsKey(keyName))
+            {
+                vaultItems.Add(keyName, vaultInfo);
+                WriteSecretVaultRegistry(vaultItems);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Remove item from cache.
+        /// </summary>
+        /// <param name="keyName">Name of item to remove.</param>
+        /// <returns>True when item is successfully removed.</returns>
+        public static Hashtable Remove(string keyName)
+        {
+            var vaultItems = GetAll();
+            if (vaultItems.ContainsKey(keyName))
+            {
+                Hashtable vaultInfo = (Hashtable) vaultItems[keyName];
+                vaultItems.Remove(keyName);
+                WriteSecretVaultRegistry(vaultItems);
+                return vaultInfo;
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        #region Private methods
+
+        private static void RefreshCache()
+        {
+            var vaultItems = ReadSecretVaultRegistry();
+
+            lock (_vaultCache)
+            {
+                _vaultCache = vaultItems;
+            }
+        }
+
+        private static Hashtable ConvertJsonToHashtable(string json)
+        {
+            var psObject = InvokeScript(
+                script: ConvertJsonToHashtableScript,
+                args: new object[] { json });
+
+            return psObject[0].BaseObject as Hashtable;
+        }
+
+        /// <summary>
+        /// Reads the current user secret vault registry information from file.
+        /// </summary>
+        /// <returns>Hashtable containing registered vault information.</returns>
+        private static Hashtable ReadSecretVaultRegistry()
+        {
+            if (!File.Exists(RegistryFilePath))
+            {
+                return new Hashtable();
+            }
+
+            string jsonInfo = File.ReadAllText(RegistryFilePath);
+            return ConvertJsonToHashtable(jsonInfo);
+        }
+
+        /// <summary>
+        /// Writes the Hashtable registered vault information data to file as json.
+        /// </summary>
+        /// <param>Hashtable containing registered vault information.</param>
+        private static void WriteSecretVaultRegistry(Hashtable dataToWrite)
+        {
+            var psObject = InvokeScript(
+                script: @"param ([hashtable] $dataToWrite) ConvertTo-Json $dataToWrite",
+                args: new object[] { dataToWrite });
+            string jsonInfo = psObject[0].BaseObject as string;
+            File.WriteAllText(RegistryFilePath, jsonInfo);
+        }
+
+        private static Collection<PSObject> InvokeScript(string script, object[] args)
+        {
+            _powershell.Commands.Clear();
+            _powershell.AddScript(script).AddParameters(args);
+
+            return _powershell.Invoke();
+        }
+
+        #endregion
     }
 
     #endregion
