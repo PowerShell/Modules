@@ -1291,7 +1291,10 @@ namespace Microsoft.PowerShell.SecretsManagement
         //
         // Default commands:
         //
-        //  # Retrieve secret object from vault and write to output
+        //  # Retrieve secret object from vault and returns
+        //  # a collection of PSCustomObject with properties:
+        //  #   Name:  <secretName>     (string)
+        //  #   Value: <secretValue>    (object)
         //  Get-Secret (required)
         //      [string] $Name
         //
@@ -1449,13 +1452,13 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         /// <summary>
         /// Invokes module command to get secret from this vault.
-        /// Output is sent to cmdlet pipe.
         /// <summary>
-        /// <param name="cmdlet">PowerShell cmdlet to invoke module command on.</param>
-        /// <param name="name">Name of secret to get</param>
-        public void InvokeGetSecret(
-            PSCmdlet cmdlet,
-            string name)
+        /// <param name="name">Name of secret to get.</param>
+        /// <param name="errors">Collection of any errors.</param>
+        /// <returns>Collection of ordered dictionary </returns>
+        public Collection<PSObject> InvokeGetSecret(
+            string name,
+            out PSDataCollection<ErrorRecord> errors)
         {
             // Required parameter.
             Hashtable parameters = new Hashtable() {
@@ -1464,12 +1467,10 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             if (_haveDefaultGetCommand)
             {
-                // TODO: If single object returned, unwrap collection.
-                cmdlet.WriteObject(
-                    PowerShellInvoker.InvokeScript(
-                        script: RunCommandScript,
-                        args: new object[] { ModulePath, ModuleName, DefaultSecretGetCmd, parameters }));
-                return;
+                return PowerShellInvoker.InvokeScript<PSObject>(
+                    script: RunCommandScript,
+                    args: new object[] { ModulePath, ModuleName, DefaultSecretGetCmd, parameters },
+                    errors: out errors);
             }
 
             // Get stored script parameters if provided.
@@ -1489,11 +1490,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 _GetSecretScriptBlock = ScriptBlock.Create(SecretGetScript);
             }
 
-            // TODO: If single object returned, unwrap collection.
-            cmdlet.WriteObject(
-                PowerShellInvoker.InvokeScript(
-                    script: RunScriptScript,
-                    args: new object[] { _GetSecretScriptBlock, parameters }));
+            return PowerShellInvoker.InvokeScript<PSObject>(
+                script: RunScriptScript,
+                args: new object[] { _GetSecretScriptBlock, parameters },
+                errors: out errors);
         }
 
         /// <summary>
@@ -1501,30 +1501,37 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </summary>
         /// <param name="cmdlet">PowerShell cmdlet to invoke module command on.</param>
         /// <param name="name">Name of secret to add.</param>
-        /// <param name="secret">Secret object to ad to vault.</param>
+        /// <param name="secret">Secret object to add to vault.</param>
         public void InvokeSetSecret(
             PSCmdlet cmdlet,
             string name,
-            PSObject secret)
+            object secret)
         {
-            Hashtable parameters = null;
+            Hashtable parameters = new Hashtable() {
+                { "Name", name },
+                { "Secret", secret }
+            };
 
             if (_haveDefaultSetCommand)
             {
-                parameters = new Hashtable() {
-                    { "Name", name },
-                    { "Secret", secret }
-                };
-
                 cmdlet.WriteObject(
-                    PowerShellInvoker.InvokeScript(
+                    PowerShellInvoker.InvokeScript<PSObject>(
                         script: RunCommandScript,
-                        args: new object[] { ModulePath, ModuleName, DefaultSecretSetCmd, parameters }));
+                        mergeErrorToOutput: true,
+                        args: new object[] { ModulePath, ModuleName, DefaultSecretSetCmd, parameters },
+                        errors: out PSDataCollection<ErrorRecord> _));
                 return;
             }
 
             // Get stored script parameters if provided.
-            parameters = GetParamsFromStore(SecretSetParamsName);
+            var additionalParameters = GetParamsFromStore(SecretSetParamsName);
+            if (additionalParameters != null)
+            {
+                foreach (var key in additionalParameters.Keys)
+                {
+                    parameters.Add((string) key, additionalParameters[key]);
+                }
+            }
 
             // Use provided secret get script.
             if (_SetSecretScriptBlock == null)
@@ -1534,9 +1541,11 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             cmdlet.WriteObject(
-                PowerShellInvoker.InvokeScript(
+                PowerShellInvoker.InvokeScript<PSObject>(
                     script: RunScriptScript,
-                    args: new object[] { _SetSecretScriptBlock, parameters }));
+                    mergeErrorToOutput: true,
+                    args: new object[] { _SetSecretScriptBlock, parameters },
+                    errors: out PSDataCollection<ErrorRecord> _));
         }
 
         /// <summary>
@@ -1548,35 +1557,44 @@ namespace Microsoft.PowerShell.SecretsManagement
             PSCmdlet cmdlet,
             string name)
         {
-            Hashtable parameters = null;
+            Hashtable parameters = new Hashtable() {
+                { "Name", name }
+            };
 
             if (_haveDefaultRemoveCommand)
             {
-                parameters = new Hashtable() {
-                    { "Name", name }
-                };
-
                 cmdlet.WriteObject(
-                    PowerShellInvoker.InvokeScript(
+                    PowerShellInvoker.InvokeScript<PSObject>(
                         script: RunCommandScript,
-                        args: new object[] { ModulePath, ModuleName, DefaultSecretRemoveCmd, parameters }));
+                        mergeErrorToOutput: true,
+                        args: new object[] { ModulePath, ModuleName, DefaultSecretRemoveCmd, parameters },
+                        errors: out PSDataCollection<ErrorRecord> _));
                 return;
             }
 
             // Get stored script parameters if provided.
-            parameters = GetParamsFromStore(SecretRemoveParamsName);
+            var additionalParameters = GetParamsFromStore(SecretRemoveParamsName);
+            if (additionalParameters != null)
+            {
+                foreach (var key in additionalParameters.Keys)
+                {
+                    parameters.Add((string) key, additionalParameters[key]);
+                }
+            }
 
             // Use provided secret get script.
             if (_RemoveSecretScriptBlock == null)
             {
                 // TODO: !! Add support for creation of *untrusted* script block. !!
-                _RemoveSecretScriptBlock = ScriptBlock.Create(SecretSetScript);
+                _RemoveSecretScriptBlock = ScriptBlock.Create(SecretRemoveScript);
             }
 
             cmdlet.WriteObject(
-                PowerShellInvoker.InvokeScript(
+                PowerShellInvoker.InvokeScript<PSObject>(
                     script: RunScriptScript,
-                    args: new object[] { _RemoveSecretScriptBlock, parameters }));
+                    mergeErrorToOutput: true,
+                    args: new object[] { _RemoveSecretScriptBlock, parameters },
+                    errors: out PSDataCollection<ErrorRecord> _));
         }
 
         #endregion
@@ -1629,9 +1647,11 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Public methods
 
-        public static Collection<PSObject> InvokeScript(
+        public static Collection<T> InvokeScript<T>(
             string script,
-            object[] args)
+            object[] args,
+            out PSDataCollection<ErrorRecord> errors,
+            bool mergeErrorToOutput = false)
         {
             lock (_syncObject)
             {
@@ -1645,12 +1665,18 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
 
                 _powershell.Commands.Clear();
+                _powershell.Streams.ClearStreams();
                 _powershell.Runspace.ResetRunspaceState();
 
                 _powershell.AddScript(script).AddParameters(args);
-                _powershell.Commands.Commands[0].MergeMyResults(PipelineResultTypes.All, PipelineResultTypes.Output);
+                if (mergeErrorToOutput)
+                {
+                    _powershell.Commands.Commands[0].MergeMyResults(PipelineResultTypes.Error, PipelineResultTypes.Output);
+                }
 
-                return _powershell.Invoke();
+                var results = _powershell.Invoke<T>();
+                errors = _powershell.Streams.Error;
+                return results;
             }
         }
 
@@ -1845,9 +1871,10 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         private static Hashtable ConvertJsonToHashtable(string json)
         {
-            var psObject = PowerShellInvoker.InvokeScript(
+            var psObject = PowerShellInvoker.InvokeScript<PSObject>(
                 script: ConvertJsonToHashtableScript,
-                args: new object[] { json });
+                args: new object[] { json },
+                errors: out PSDataCollection<ErrorRecord> _);
 
             return psObject[0].BaseObject as Hashtable;
         }
@@ -1863,8 +1890,30 @@ namespace Microsoft.PowerShell.SecretsManagement
                 return new Hashtable();
             }
 
-            string jsonInfo = File.ReadAllText(RegistryFilePath);
-            return ConvertJsonToHashtable(jsonInfo);
+            var count = 0;
+            do
+            {
+                try
+                {
+                    string jsonInfo = File.ReadAllText(RegistryFilePath);
+                    return ConvertJsonToHashtable(jsonInfo);
+                }
+                catch (IOException)
+                {
+                    // Make up to four attempts.
+                }
+                catch
+                {
+                    // Unknown error.
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(500);
+
+            } while (++count < 4);
+
+            Dbg.Assert(false, "Unable to read vault registry file!");
+            return new Hashtable();
         }
 
         /// <summary>
@@ -1873,9 +1922,10 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <param>Hashtable containing registered vault information.</param>
         private static void WriteSecretVaultRegistry(Hashtable dataToWrite)
         {
-            var psObject = PowerShellInvoker.InvokeScript(
+            var psObject = PowerShellInvoker.InvokeScript<PSObject>(
                 script: @"param ([hashtable] $dataToWrite) ConvertTo-Json $dataToWrite",
-                args: new object[] { dataToWrite });
+                args: new object[] { dataToWrite },
+                errors: out PSDataCollection<ErrorRecord> _);
             string jsonInfo = psObject[0].BaseObject as string;
             File.WriteAllText(RegistryFilePath, jsonInfo);
         }

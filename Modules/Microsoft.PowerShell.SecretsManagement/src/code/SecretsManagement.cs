@@ -129,7 +129,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     Get-Module -Name $ModulePath -List
                 ",
                 args: new object[] { ModulePath });
-            PSModuleInfo moduleInfo = results[0].BaseObject as PSModuleInfo;
+            PSModuleInfo moduleInfo = (results.Count == 1) ? results[0].BaseObject as PSModuleInfo : null;
             if (moduleInfo == null)
             {
                 ThrowTerminatingError(
@@ -358,12 +358,51 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
+    #region SecretsVaultBase
+
+    public abstract class SecretsVaultCmdlet : PSCmdlet
+    {
+        /// <summary>
+        /// Look up and return specified extension module by name.
+        /// </summary>
+        /// <param name="name">Name of extension vault to return.</param>
+        /// <returns>Extension vault.</returns>
+        internal ExtensionVaultModule GetExtensionVault(string name)
+        {
+            if (!RegisteredVaultCache.VaultExtensions.TryGetValue(
+                    key: name,
+                    value: out ExtensionVaultModule extensionModule))
+                {
+                    var msg = string.Format(CultureInfo.InvariantCulture, "Vault not found in registry: {0}", name);
+
+                    ThrowTerminatingError(
+                        new ErrorRecord(
+                            new PSInvalidOperationException(msg),
+                            "GetSecretVaultNotFound",
+                            ErrorCategory.ObjectNotFound,
+                            this));
+                }
+
+            return extensionModule;
+        }
+
+        internal void WriteInvokeErrors(PSDataCollection<ErrorRecord> errors)
+        {
+            foreach (var error in errors)
+            {
+                WriteVerbose(error.ToString());
+            }
+        }
+    }
+
+    #endregion
+
     /// <summary>
     /// Cmdlet to return registered secret vaults as SecretVaultInfo objects.
     /// If no name is provided then all registered secret vaults will be returned.
     /// </summary>
     [Cmdlet(VerbsCommon.Get, "SecretsVault")]
-    public sealed class GetSecretsVaultCommand : PSCmdlet
+    public sealed class GetSecretsVaultCommand : SecretsVaultCmdlet
     {
         #region Parameters
 
@@ -401,108 +440,27 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Add-Secret
-
-    /// <summary>
-    /// Adds a provided secret to the local default vault.
-    /// </summary>
-    [Cmdlet(VerbsCommon.Add, "Secret")]
-    public sealed class AddSecretCommand : PSCmdlet
-    {
-        #region Parameters
-
-        /// <summary>
-        /// Gets or sets a name of the secret to be added.
-        /// </summary>
-        [Parameter(Mandatory=true)]
-        [ValidateNotNullOrEmpty]
-        public string Name { get; set; }
-
-        /// <summary>
-        /// Gets or sets a value that is the secret to be added.
-        /// Supported types:
-        ///     PSCredential
-        ///     SecureString
-        ///     String
-        ///     Hashtable
-        ///     byte[]
-        /// </summary>
-        [Parameter(Mandatory=true)]
-        public object Secret { get; set; }
-
-        /// <summary>
-        /// Gets or sets a flag indicating whether an existing secret with the same name is overwritten.
-        /// </summary>
-        [Parameter]
-        public SwitchParameter NoClobber { get; set; }
-
-        #endregion
-
-        #region Overrides
-
-        protected override void ProcessRecord()
-        {
-            // TODO: 
-        }
-
-        #endregion
-
-    }
-
-    #endregion
-
-    #region Remove-Secret
-
-    /// <summary>
-    /// Removes a secret by name from the local default vault.
-    /// <summary>
-    [Cmdlet(VerbsCommon.Remove, "Secret")]
-    public sealed class RemoveSecretCommand : PSCmdlet
-    {
-        #region Parameters
-
-        /// <summary>
-        /// Gets or sets a name of the secret to be removed.
-        /// </summary>
-        [Parameter(Mandatory=true)]
-        [ValidateNotNullOrEmpty]
-        public string Name { get; set; }
-
-        #endregion
-
-        #region Overrides
-
-        protected override void ProcessRecord()
-        {
-            // TODO: 
-        }
-
-        #endregion
-
-    }
-
-    #endregion
-
     #region Get-Secret
 
     /// <summary>
-    /// Retrieves a secret by name.
-    /// If no name is provided then returns all secrets from vault.
+    /// Retrieves a secret by name, wild cards are allowed.
+    /// If no vault is specified then all vaults are searched.
+    /// The first secret matching the Name parameter is returned.
     /// </summary>
     [Cmdlet(VerbsCommon.Get, "Secret")]
     [OutputType(typeof(object))]
-    public sealed class GetSecretCommand : PSCmdlet
+    public sealed class GetSecretCommand : SecretsVaultCmdlet
     {
         #region Parameters
 
         /// <summary>
-        /// Gets or sets an optional name of secret to retrieve.
-        [Parameter(Position=0)]
+        /// Gets or sets a name of secret to retrieve.
+        /// <summary>
+        [Parameter(Position=0, Mandatory=true)]
         public string Name { get; set; }
 
         /// <summary>
         /// Gets or sets an optional name of the vault to retrieve the secret from.
-        /// If no vault name is specified then the secret will be retrieved from the default (local) vault.
         /// </summary>
         [Parameter]
         public string Vault { get; set; }
@@ -516,32 +474,348 @@ namespace Microsoft.PowerShell.SecretsManagement
             // Search single vault.
             if (!string.IsNullOrEmpty(Vault))
             {
-                if (!RegisteredVaultCache.VaultExtensions.TryGetValue(
-                    key: Vault,
-                    value: out ExtensionVaultModule extensionModule))
+                var extensionModule = GetExtensionVault(Vault);
+                var results = extensionModule.InvokeGetSecret(
+                    name: Name,
+                    errors: out PSDataCollection<ErrorRecord> errors);
+                if (results.Count > 0)
                 {
-                    var msg = string.Format(CultureInfo.InvariantCulture, "Vault not found in registry: {0}", Vault);
-
-                    ThrowTerminatingError(
-                        new ErrorRecord(
-                            new PSInvalidOperationException(msg),
-                            "GetSecretVaultNotFound",
-                            ErrorCategory.ObjectNotFound,
-                            this));
+                    dynamic secret = results[0];
+                    WriteObject(secret.Value);
                 }
-
-                extensionModule.InvokeGetSecret(this, Name);
+                WriteInvokeErrors(errors);
                 return;
             }
 
             // Search through all vaults.
             foreach (var extensionModule in RegisteredVaultCache.VaultExtensions.Values)
             {
-                extensionModule.InvokeGetSecret(this, Name);
+                try
+                {
+                    var results = extensionModule.InvokeGetSecret(
+                        name: Name,
+                        errors: out PSDataCollection<ErrorRecord> errors);
+                    if (results.Count > 0)
+                    {
+                        dynamic secret = results[0];
+                        if (secret != null)
+                        {
+                            WriteObject(secret.Value);
+                        }
+                        return;
+                    }
+                    WriteInvokeErrors(errors);
+                }
+                catch (Exception ex)
+                {
+                    WriteError(
+                        new ErrorRecord(
+                            ex,
+                            "GetSecretException",
+                            ErrorCategory.InvalidOperation,
+                            this));
+                }
+            }
+
+            // Also search the built-in local vault.
+            int errorCode = 0;
+            if (LocalSecretStore.ReadObject(
+                name: Name,
+                outObject: out object outObject,
+                ref errorCode))
+            {
+                WriteObject(outObject);
             }
         }
 
         #endregion
+    }
+
+    #endregion
+
+    #region Get-Secrets
+
+    /// <summary>
+    /// Enumerates secrets by name, wild cards are allowed.
+    /// If no name is provided then all secrets are returned.
+    /// If no vault is specified then all vaults are searched.
+    /// </summary>
+    [Cmdlet(VerbsCommon.Get, "Secrets")]
+    [OutputType(typeof(PSObject))]
+    public sealed class GetSecretsCommand : SecretsVaultCmdlet
+    {
+        #region Parameters
+
+        /// <summary>
+        /// Gets or sets a name used to match and return secrets.
+        /// </summary>
+        [Parameter(Position=0)]
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional name of the vault to retrieve the secret from.
+        /// </summary>
+        [Parameter]
+        public string Vault { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            // Search single vault.
+            if (!string.IsNullOrEmpty(Vault))
+            {
+                var extensionModule = GetExtensionVault(Vault);
+                WriteObject(
+                    extensionModule.InvokeGetSecret(
+                        name: Name,
+                        errors: out PSDataCollection<ErrorRecord> errors));
+                WriteInvokeErrors(errors);
+
+                return;
+            }
+
+            // Search through all vaults.
+            foreach (var extensionModule in RegisteredVaultCache.VaultExtensions.Values)
+            {
+                try
+                {
+                    WriteObject(
+                        extensionModule.InvokeGetSecret(
+                            name: Name,
+                            errors: out PSDataCollection<ErrorRecord> errors));
+                    WriteInvokeErrors(errors);
+                }
+                catch (Exception ex)
+                {
+                    WriteError(
+                        new ErrorRecord(
+                            ex,
+                            "GetSecretException",
+                            ErrorCategory.InvalidOperation,
+                            this));
+                }
+            }
+
+            // Also search the built-in local vault.
+            int errorCode = 0;
+            if (LocalSecretStore.EnumerateObjects(
+                filter: Name?? "*",
+                all: false,
+                outObjects: out KeyValuePair<string, object>[] outObjects,
+                errorCode: ref errorCode))
+            {
+                foreach (var pair in outObjects)
+                {
+                    var psObject = new PSObject();
+                    psObject.Members.Add(
+                        new PSNoteProperty(
+                            "Name", 
+                            pair.Key));
+                    psObject.Members.Add(
+                        new PSNoteProperty(
+                            "Value",
+                            pair.Value));
+                    psObject.Members.Add(
+                        new PSNoteProperty(
+                            "Vault",
+                            "BuiltInLocalVault"));
+
+                    WriteObject(psObject);
+                }
+            }
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region Add-Secret
+
+    /// <summary>
+    /// Adds a provided secret to the specified extension vault, 
+    /// or the built-in default store if an extension vault is not specified.
+    /// </summary>
+    [Cmdlet(VerbsCommon.Add, "Secret")]
+    public sealed class AddSecretCommand : SecretsVaultCmdlet
+    {
+        #region Parameters
+
+        /// <summary>
+        /// Gets or sets a name of the secret to be added.
+        /// </summary>
+        [Parameter(Position=0, Mandatory=true)]
+        [ValidateNotNullOrEmpty]
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value that is the secret to be added.
+        /// Supported types:
+        ///     PSCredential
+        ///     SecureString
+        ///     String
+        ///     Hashtable
+        ///     byte[]
+        /// </summary>
+        [Parameter(Position=1, Mandatory=true)]
+        public object Secret { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional extension vault name.
+        /// </summary>
+        [Parameter]
+        public string Vault { get; set; }
+
+        /// <summary>
+        /// Gets or sets a flag indicating whether an existing secret with the same name is overwritten.
+        /// </summary>
+        [Parameter]
+        public SwitchParameter NoClobber { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            // Add to specified vault.
+            if (!string.IsNullOrEmpty(Vault))
+            {
+                var extensionModule = GetExtensionVault(Vault);
+                
+                // If NoClobber is selected, then check to see if it already exists.
+                if (NoClobber)
+                {
+                    var results = extensionModule.InvokeGetSecret(
+                        name: Name,
+                        errors: out PSDataCollection<ErrorRecord> _);
+                    if (results.Count > 0)
+                    {
+                        var msg = string.Format(CultureInfo.InvariantCulture, "A secret with name {0} already exists in vault {1}", Name, Vault);
+                        ThrowTerminatingError(
+                            new ErrorRecord(
+                                new PSInvalidOperationException(msg),
+                                "AddSecretAlreadyExists",
+                                ErrorCategory.ResourceExists,
+                                this));
+                    }
+                }
+
+                // Add new secret to vault.
+                extensionModule.InvokeSetSecret(
+                    cmdlet: this,
+                    name: Name,
+                    secret: Secret);
+                
+                return;
+            }
+
+            // Add to default built-in vault (after NoClobber check).
+            int errorCode = 0;
+            if (NoClobber)
+            {
+                if (LocalSecretStore.ReadObject(
+                    name: Name,
+                    out object _,
+                    ref errorCode))
+                {
+                    var msg = string.Format(CultureInfo.InvariantCulture, 
+                        "A secret with name {0} already exists in the local default vault", Name);
+                    ThrowTerminatingError(
+                        new ErrorRecord(
+                            new PSInvalidOperationException(msg),
+                            "AddSecretAlreadyExists",
+                            ErrorCategory.ResourceExists,
+                            this));
+                }
+            }
+
+            errorCode = 0;
+            if (!LocalSecretStore.WriteObject(
+                name: Name,
+                objectToWrite: Secret,
+                ref errorCode))
+            {
+                var errorMessage = LocalSecretStore.GetErrorMessage(errorCode);
+                var msg = string.Format(CultureInfo.InvariantCulture, 
+                    "The secret could not be written to the local default vault.  Error: {0}", errorMessage);
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        new PSInvalidOperationException(msg),
+                        "AddSecretCannotWrite",
+                        ErrorCategory.WriteError,
+                        this));
+            }
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region Remove-Secret
+
+    /// <summary>
+    /// Removes a secret by name from the local default vault.
+    /// <summary>
+    [Cmdlet(VerbsCommon.Remove, "Secret")]
+    public sealed class RemoveSecretCommand : SecretsVaultCmdlet
+    {
+        #region Parameters
+
+        /// <summary>
+        /// Gets or sets a name of the secret to be removed.
+        /// </summary>
+        [Parameter(Position=0, Mandatory=true)]
+        [ValidateNotNullOrEmpty]
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional extension vault name.
+        /// </summary>
+        [Parameter]
+        public string Vault { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            // Remove from specified vault.
+            if (!string.IsNullOrEmpty(Vault))
+            {
+                var extensionModule = GetExtensionVault(Vault);
+                extensionModule.InvokeRemoveSecret(
+                    cmdlet: this,
+                    name: Name);
+                
+                return;
+            }
+
+            // Remove from local built-in default vault.
+            int errorCode = 0;
+            if (!LocalSecretStore.DeleteObject(
+                name: Name,
+                ref errorCode))
+            {
+                var errorMessage = LocalSecretStore.GetErrorMessage(errorCode);
+                var msg = string.Format(CultureInfo.InvariantCulture, 
+                    "The secret could not be removed from the local default vault. Error: {0}", errorMessage);
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        new PSInvalidOperationException(msg),
+                        "RemoveSecretCannotDelete",
+                        ErrorCategory.InvalidOperation,
+                        this));
+            }
+        }
+
+        #endregion
+
     }
 
     #endregion
@@ -633,7 +907,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             if (LocalSecretStore.EnumerateObjects(
                 filter,
                 All,
-                out KeyValuePair<string, object>[] outObjects,
+                out KeyValuePair<string,object>[] outObjects,
                 ref errorCode))
             {
                 WriteObject(outObjects);
