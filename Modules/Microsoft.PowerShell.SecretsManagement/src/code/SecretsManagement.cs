@@ -525,7 +525,16 @@ namespace Microsoft.PowerShell.SecretsManagement
                 ref errorCode))
             {
                 WriteObject(outObject);
+                return;
             }
+
+            var msg = string.Format("The secret {0} was not found.", Name);
+            WriteError(
+                new ErrorRecord(
+                    new ItemNotFoundException(msg),
+                    "GetSecretNotFound",
+                    ErrorCategory.ObjectNotFound,
+                    this));
         }
 
         #endregion
@@ -557,6 +566,12 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </summary>
         [Parameter]
         public string Vault { get; set; }
+
+        /// <summary>
+        /// Gets or sets an optional switch that includes secrets from the default local built-in vault.
+        /// </summary>
+        [Parameter]
+        public SwitchParameter IncludeLocalDefault { get; set; }
 
         #endregion
 
@@ -599,31 +614,34 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
             }
 
-            // Also search the built-in local vault.
-            int errorCode = 0;
-            if (LocalSecretStore.EnumerateObjects(
-                filter: Name?? "*",
-                all: false,
-                outObjects: out KeyValuePair<string, object>[] outObjects,
-                errorCode: ref errorCode))
+            // Also search the built-in local vault, if requested.
+            if (IncludeLocalDefault)
             {
-                foreach (var pair in outObjects)
+                int errorCode = 0;
+                if (LocalSecretStore.EnumerateObjects(
+                    filter: Name?? "*",
+                    all: false,
+                    outObjects: out KeyValuePair<string, object>[] outObjects,
+                    errorCode: ref errorCode))
                 {
-                    var psObject = new PSObject();
-                    psObject.Members.Add(
-                        new PSNoteProperty(
-                            "Name", 
-                            pair.Key));
-                    psObject.Members.Add(
-                        new PSNoteProperty(
-                            "Value",
-                            pair.Value));
-                    psObject.Members.Add(
-                        new PSNoteProperty(
-                            "Vault",
-                            "BuiltInLocalVault"));
+                    foreach (var pair in outObjects)
+                    {
+                        var psObject = new PSObject();
+                        psObject.Members.Add(
+                            new PSNoteProperty(
+                                "Name", 
+                                pair.Key));
+                        psObject.Members.Add(
+                            new PSNoteProperty(
+                                "Value",
+                                pair.Value));
+                        psObject.Members.Add(
+                            new PSNoteProperty(
+                                "Vault",
+                                "BuiltInLocalVault"));
 
-                    WriteObject(psObject);
+                        WriteObject(psObject);
+                    }
                 }
             }
         }
@@ -736,7 +754,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             errorCode = 0;
             if (!LocalSecretStore.WriteObject(
                 name: Name,
-                objectToWrite: Secret,
+                objectToWrite: (Secret is PSObject psObject) ? psObject.BaseObject : Secret,
                 ref errorCode))
             {
                 var errorMessage = LocalSecretStore.GetErrorMessage(errorCode);
