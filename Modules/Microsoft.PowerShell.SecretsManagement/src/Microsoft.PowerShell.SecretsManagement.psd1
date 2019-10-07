@@ -36,35 +36,8 @@ for use in managing and retrieving secrets.
 # Minimum version of the PowerShell engine required by this module
 PowerShellVersion = '5.1'
 
-# Name of the PowerShell host required by this module
-# PowerShellHostName = ''
-
-# Minimum version of the PowerShell host required by this module
-# PowerShellHostVersion = ''
-
-# Minimum version of Microsoft .NET Framework required by this module. This prerequisite is valid for the PowerShell Desktop edition only.
-# DotNetFrameworkVersion = ''
-
-# Minimum version of the common language runtime (CLR) required by this module. This prerequisite is valid for the PowerShell Desktop edition only.
-# CLRVersion = ''
-
-# Processor architecture (None, X86, Amd64) required by this module
-# ProcessorArchitecture = ''
-
-# Modules that must be imported into the global environment prior to importing this module
-# RequiredModules = @()
-
-# Assemblies that must be loaded prior to importing this module
-# RequiredAssemblies = @()
-
-# Script files (.ps1) that are run in the caller's environment prior to importing this module.
-# ScriptsToProcess = @()
-
-# Type files (.ps1xml) to be loaded when importing this module
-# TypesToProcess = @()
-
 # Format files (.ps1xml) to be loaded when importing this module
-# FormatsToProcess = @()
+FormatsToProcess = @('Microsoft.PowerShell.SecretsManagement.format.ps1xml')
 
 # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
 # NestedModules = @()
