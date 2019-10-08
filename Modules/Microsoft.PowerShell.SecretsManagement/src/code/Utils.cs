@@ -1320,7 +1320,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         internal const string GetSecretScriptStr = "GetSecretScript";
         internal const string GetSecretParamsStr = "GetSecretParamsName";
         internal const string SetSecretScriptStr = "SetSecretScript";
-        internal const string SetSecretParamsStr = "SetSecretParamsStr";
+        internal const string SetSecretParamsStr = "SetSecretParamsName";
         internal const string RemoveSecretScriptStr = "RemoveSecretScriptStr";
         internal const string RemoveSecretParamsStr = "RemoveSecretParamsName";
         internal const string HaveGetCmdletStr = "HaveGetCmdlet";
@@ -1335,7 +1335,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 [hashtable] $Params
             )
 
-            Import-Module -Name $ModulePath -Scope Local
+            Import-Module -Name $ModulePath -Scope Local -Force
             & ""$ModuleName\$CommandName"" @Params
         ";
 
@@ -1744,6 +1744,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         private static readonly FileSystemWatcher _registryWatcher;
         private static readonly Dictionary<string, ExtensionVaultModule> _vaultCache;
         private static Hashtable _vaultInfoCache;
+        private static bool _allowAutoRefresh;
 
         #endregion
 
@@ -1775,7 +1776,6 @@ namespace Microsoft.PowerShell.SecretsManagement
         static RegisteredVaultCache()
         {
             // Verify path or create.
-            // TODO: How to handle IO errors...
             if (!Directory.Exists(RegistryDirectoryPath))
             {
                 Directory.CreateDirectory(RegistryDirectoryPath);
@@ -1789,9 +1789,10 @@ namespace Microsoft.PowerShell.SecretsManagement
             _registryWatcher.NotifyFilter = NotifyFilters.LastWrite;
             _registryWatcher.Filter = "VaultInfo";
             _registryWatcher.EnableRaisingEvents = true;
-            _registryWatcher.Changed += (sender, args) => RefreshCache();
+            _registryWatcher.Changed += (sender, args) => { if (_allowAutoRefresh) { RefreshCache(); } };
 
             RefreshCache();
+            _allowAutoRefresh = true;
         }
 
         #endregion
@@ -1912,7 +1913,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     break;
                 }
 
-                System.Threading.Thread.Sleep(500);
+                System.Threading.Thread.Sleep(250);
 
             } while (++count < 4);
 
@@ -1931,7 +1932,39 @@ namespace Microsoft.PowerShell.SecretsManagement
                 args: new object[] { dataToWrite },
                 errors: out PSDataCollection<ErrorRecord> _);
             string jsonInfo = psObject[0].BaseObject as string;
-            File.WriteAllText(RegistryFilePath, jsonInfo);
+
+            _allowAutoRefresh = false;
+            try
+            {
+                var count = 0;
+                do
+                {
+                    try
+                    {
+                        File.WriteAllText(RegistryFilePath, jsonInfo);
+                        RefreshCache();
+                        return;
+                    }
+                    catch (IOException)
+                    {
+                        // Make up to four attempts.
+                    }
+                    catch
+                    {
+                        // Unknown error.
+                        break;
+                    }
+
+                    System.Threading.Thread.Sleep(250);
+
+                } while (++count < 4);
+            }
+            finally
+            {
+                _allowAutoRefresh = true;
+            }
+
+            Dbg.Assert(false, "Unable to write vault registry file!");
         }
 
         #endregion
