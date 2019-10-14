@@ -239,6 +239,16 @@ namespace Microsoft.PowerShell.SecretsManagement
                 return;
             }
 
+            // TODO: Look into changing the extension module implementation from required cmdlets/parameters to
+            // a C# implementing class, similar to 'IModuleAssemblyInitializer'.  A binary cmdlet assembly or 
+            // a module 'RequiredAssembly' can implement the class.  Secrets manager vault implementation can then
+            // be loading a module, create instance of implementing type and use provided methods to manipulate
+            // vault functions.  Type instances are created via dotNet Activator.CreateInstance().
+            // Method parameter secrets can still be stored as a hash table (and PSObject) and passed in to 
+            // methods as name/value pairs to be used as needed.
+            // Downside to this is that existing vault modules cannot be used as extensions "as-is".  But an
+            // abstract class can provide helper methods that help ensure methods function correctly.
+
             // Get module information (don't load it because binary modules cannot be re-loaded).
             var results = InvokeCommand.InvokeScript(
                 script: @"
@@ -503,11 +513,21 @@ namespace Microsoft.PowerShell.SecretsManagement
             return extensionModule;
         }
 
-        internal void WriteInvokeErrors(PSDataCollection<ErrorRecord> errors)
+        internal void WriteDataStreams(PSDataStreams dataStreams)
         {
-            foreach (var error in errors)
+            foreach (var error in dataStreams.Error)
             {
-                WriteVerbose(error.ToString());
+                WriteError(error);
+            }
+
+            foreach (var warning in dataStreams.Warning)
+            {
+                WriteWarning(warning.Message);
+            }
+
+            foreach (var verbose in dataStreams.Verbose)
+            {
+                WriteVerbose(verbose.Message);
             }
         }
     }
@@ -617,9 +637,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                 var extensionModule = GetExtensionVault(Vault);
                 WriteObject(
                     extensionModule.InvokeGetSecret(
-                        name: Name,
-                        errors: out PSDataCollection<ErrorRecord> errors));
-                WriteInvokeErrors(errors);
+                        cmdlet: this,
+                        name: Name));
 
                 return;
             }
@@ -631,9 +650,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                 {
                     WriteObject(
                         extensionModule.InvokeGetSecret(
-                            name: Name,
-                            errors: out PSDataCollection<ErrorRecord> errors));
-                    WriteInvokeErrors(errors);
+                            cmdlet: this,
+                            name: Name));
                 }
                 catch (Exception ex)
                 {
@@ -739,14 +757,18 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                 var extensionModule = GetExtensionVault(Vault);
                 var results = extensionModule.InvokeGetSecret(
-                    name: Name,
-                    errors: out PSDataCollection<ErrorRecord> errors);
+                    cmdlet: this,
+                    name: Name);
                 if (results.Count > 0)
                 {
                     dynamic secret = results[0];
                     WriteObject(secret.Value);
                 }
-                WriteInvokeErrors(errors);
+                else
+                {
+                    WriteNotFoundError();
+                }
+
                 return;
             }
 
@@ -756,8 +778,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                 try
                 {
                     var results = extensionModule.InvokeGetSecret(
-                        name: Name,
-                        errors: out PSDataCollection<ErrorRecord> errors);
+                        cmdlet: this,
+                        name: Name);
                     if (results.Count > 0)
                     {
                         dynamic secret = results[0];
@@ -767,7 +789,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                         }
                         return;
                     }
-                    WriteInvokeErrors(errors);
                 }
                 catch (Exception ex)
                 {
@@ -786,6 +807,15 @@ namespace Microsoft.PowerShell.SecretsManagement
                 return;
             }
 
+            WriteNotFoundError();
+        }
+
+        #endregion
+
+        #region Private methods
+
+        private void WriteNotFoundError()
+        {
             var msg = string.Format(CultureInfo.InvariantCulture, "The secret {0} was not found.", Name);
             WriteError(
                 new ErrorRecord(
@@ -794,10 +824,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                     ErrorCategory.ObjectNotFound,
                     this));
         }
-
-        #endregion
-
-        #region Private methods
 
         private bool SearchLocalStore(string name)
         {
@@ -876,8 +902,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                 if (NoClobber)
                 {
                     var results = extensionModule.InvokeGetSecret(
-                        name: Name,
-                        errors: out PSDataCollection<ErrorRecord> _);
+                        cmdlet: this,
+                        name: Name);
                     if (results.Count > 0)
                     {
                         var msg = string.Format(CultureInfo.InvariantCulture, 

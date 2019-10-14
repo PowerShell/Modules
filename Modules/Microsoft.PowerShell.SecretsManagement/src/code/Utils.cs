@@ -8,10 +8,12 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Management.Automation;
+using System.Management.Automation.Remoting.Internal;
 using System.Management.Automation.Runspaces;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
+using System.Threading;
 
 using Dbg = System.Diagnostics.Debug;
 
@@ -1453,12 +1455,12 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <summary>
         /// Invokes module command to get secret from this vault.
         /// <summary>
+        /// <param name="cmdlet">PowerShell cmdlet to stream data.</param>
         /// <param name="name">Name of secret to get.</param>
-        /// <param name="errors">Collection of any errors.</param>
-        /// <returns>Collection of ordered dictionary </returns>
-        public Collection<PSObject> InvokeGetSecret(
-            string name,
-            out PSDataCollection<ErrorRecord> errors)
+        /// <returns>Collection of invocation results.</returns>
+        public PSDataCollection<PSObject> InvokeGetSecret(
+            PSCmdlet cmdlet,
+            string name)
         {
             // Required parameter.
             Hashtable parameters = new Hashtable() {
@@ -1467,10 +1469,10 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             if (HaveGetCommand)
             {
-                return PowerShellInvoker.InvokeScript<PSObject>(
+                return PowerShellInvoker.InvokeScript(
+                    cmdlet: cmdlet,
                     script: RunCommandScript,
-                    args: new object[] { ModulePath, ModuleName, DefaultGetSecretCmd, parameters },
-                    errors: out errors);
+                    args: new object[] { ModulePath, ModuleName, DefaultGetSecretCmd, parameters });
             }
 
             // Get stored script parameters if provided.
@@ -1490,16 +1492,16 @@ namespace Microsoft.PowerShell.SecretsManagement
                 _GetSecretScriptBlock = ScriptBlock.Create(GetSecretScript);
             }
 
-            return PowerShellInvoker.InvokeScript<PSObject>(
+            return PowerShellInvoker.InvokeScript(
+                cmdlet: cmdlet,
                 script: RunScriptScript,
-                args: new object[] { _GetSecretScriptBlock, parameters },
-                errors: out errors);
+                args: new object[] { _GetSecretScriptBlock, parameters });
         }
 
         /// <summary>
         /// Invokes module command to add a secret to this vault.
         /// </summary>
-        /// <param name="cmdlet">PowerShell cmdlet to invoke module command on.</param>
+        /// <param name="cmdlet">PowerShell cmdlet to stream data.</param>
         /// <param name="name">Name of secret to add.</param>
         /// <param name="secret">Secret object to add to vault.</param>
         public void InvokeSetSecret(
@@ -1515,11 +1517,10 @@ namespace Microsoft.PowerShell.SecretsManagement
             if (HaveSetCommand)
             {
                 cmdlet.WriteObject(
-                    PowerShellInvoker.InvokeScript<PSObject>(
-                        script: RunCommandScript,
-                        mergeErrorToOutput: true,
-                        args: new object[] { ModulePath, ModuleName, DefaultSetSecretCmd, parameters },
-                        errors: out PSDataCollection<ErrorRecord> _));
+                    PowerShellInvoker.InvokeScript(
+                        cmdlet: cmdlet,
+                        script: RunScriptScript,
+                        args: new object[] { _GetSecretScriptBlock, parameters }));
                 return;
             }
 
@@ -1541,17 +1542,16 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             cmdlet.WriteObject(
-                PowerShellInvoker.InvokeScript<PSObject>(
+                PowerShellInvoker.InvokeScript(
+                    cmdlet: cmdlet,
                     script: RunScriptScript,
-                    mergeErrorToOutput: true,
-                    args: new object[] { _SetSecretScriptBlock, parameters },
-                    errors: out PSDataCollection<ErrorRecord> _));
+                    args: new object[] { _SetSecretScriptBlock, parameters }));
         }
 
         /// <summary>
         /// Invokes module command to remove a secret from this vault.
         /// </summary>
-        /// <param name="cmdlet">PowerShell cmdlet to invoke module command on.</param>
+        /// <param name="cmdlet">PowerShell cmdlet to stream data.</param>
         /// <param name="name">Name of secret to remove.</param>
         public void InvokeRemoveSecret(
             PSCmdlet cmdlet,
@@ -1566,9 +1566,9 @@ namespace Microsoft.PowerShell.SecretsManagement
                 cmdlet.WriteObject(
                     PowerShellInvoker.InvokeScript<PSObject>(
                         script: RunCommandScript,
-                        mergeErrorToOutput: true,
+                        mergeDataStreamsToOutput: true,
                         args: new object[] { ModulePath, ModuleName, DefaultRemoveSecretCmd, parameters },
-                        errors: out PSDataCollection<ErrorRecord> _));
+                        dataStreams: out _));
                 return;
             }
 
@@ -1592,9 +1592,9 @@ namespace Microsoft.PowerShell.SecretsManagement
             cmdlet.WriteObject(
                 PowerShellInvoker.InvokeScript<PSObject>(
                     script: RunScriptScript,
-                    mergeErrorToOutput: true,
+                    mergeDataStreamsToOutput: true,
                     args: new object[] { _RemoveSecretScriptBlock, parameters },
-                    errors: out PSDataCollection<ErrorRecord> _));
+                    dataStreams: out _));
         }
 
         #endregion
@@ -1647,11 +1647,83 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Public methods
 
+        // TODO: Create a PowerShellInvoker instance (not static) and assign to static
+        // variable.  Then let cmdlet variable reference be settable and still used in
+        // the data stream handler enclosures.
+        public static PSDataCollection<PSObject> InvokeScript(
+            PSCmdlet cmdlet,
+            string script,
+            object[] args)
+        {
+            using (var powershell = System.Management.Automation.PowerShell.Create())
+            using (var waitData = new AutoResetEvent(false))
+            using (var dataStream = new PSDataCollection<PSStreamObject>())
+            {
+                // Handle streaming data
+                dataStream.DataAdded += (sender, dataStreamArgs) => {
+                    waitData.Set();
+                };
+                powershell.Streams.Error.DataAdded += (sender, errorStreamArgs) => {
+                    foreach (var error in powershell.Streams.Error.ReadAll())
+                    {
+                        dataStream.Add(
+                            new PSStreamObject(PSStreamObjectType.Error, error));
+                    }
+                };
+                powershell.Streams.Warning.DataAdded += (sender, warningStreamArgs) => {
+                    foreach (var warning in powershell.Streams.Warning.ReadAll())
+                    {
+                        dataStream.Add(
+                            new PSStreamObject(PSStreamObjectType.Warning, warning.Message));
+                    }
+                };
+                powershell.Streams.Verbose.DataAdded += (sender, verboseStreamArgs) => {
+                    foreach (var verboseItem in powershell.Streams.Verbose.ReadAll())
+                    {
+                        dataStream.Add(
+                            new PSStreamObject(PSStreamObjectType.Verbose, verboseItem.Message));
+                    }
+                };
+
+                powershell.AddScript(script).AddParameters(args);
+                var async = powershell.BeginInvoke<PSObject>(null);
+
+                // Wait for script to complete while writing streaming data on cmdlet thread.
+                var waitHandles = new WaitHandle[]
+                {
+                    waitData,
+                    async.AsyncWaitHandle
+                };
+                while (true)
+                {
+                    var index = WaitHandle.WaitAny(waitHandles);
+                    switch (index)
+                    {
+                        case 0:
+                            // Data available
+                            foreach (var item in dataStream.ReadAll())
+                            {
+                                item.WriteStreamObject(cmdlet: cmdlet, overrideInquire: true);
+                            }
+                            break;
+
+                        case 1:
+                            // Script execution complete
+                            var results = powershell.EndInvoke(async);
+                            return results;
+
+                        default:
+                            return null;
+                    }
+                }
+            }
+        }
+
         public static Collection<T> InvokeScript<T>(
             string script,
             object[] args,
-            out PSDataCollection<ErrorRecord> errors,
-            bool mergeErrorToOutput = false)
+            out PSDataStreams dataStreams,
+            bool mergeDataStreamsToOutput = false)
         {
             lock (_syncObject)
             {
@@ -1669,13 +1741,13 @@ namespace Microsoft.PowerShell.SecretsManagement
                 _powershell.Runspace.ResetRunspaceState();
 
                 _powershell.AddScript(script).AddParameters(args);
-                if (mergeErrorToOutput)
+                if (mergeDataStreamsToOutput)
                 {
-                    _powershell.Commands.Commands[0].MergeMyResults(PipelineResultTypes.Error, PipelineResultTypes.Output);
+                    _powershell.Commands.Commands[0].MergeMyResults(PipelineResultTypes.All, PipelineResultTypes.Output);
                 }
 
                 var results = _powershell.Invoke<T>();
-                errors = _powershell.Streams.Error;
+                dataStreams = _powershell.Streams;
                 return results;
             }
         }
@@ -1879,7 +1951,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             var psObject = PowerShellInvoker.InvokeScript<PSObject>(
                 script: ConvertJsonToHashtableScript,
                 args: new object[] { json },
-                errors: out PSDataCollection<ErrorRecord> _);
+                dataStreams: out PSDataStreams _);
 
             return psObject[0].BaseObject as Hashtable;
         }
@@ -1930,7 +2002,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             var psObject = PowerShellInvoker.InvokeScript<PSObject>(
                 script: @"param ([hashtable] $dataToWrite) ConvertTo-Json $dataToWrite",
                 args: new object[] { dataToWrite },
-                errors: out PSDataCollection<ErrorRecord> _);
+                dataStreams: out PSDataStreams _);
             string jsonInfo = psObject[0].BaseObject as string;
 
             _allowAutoRefresh = false;
