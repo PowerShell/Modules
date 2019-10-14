@@ -583,16 +583,16 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Get-Secrets
+    #region Get-SecretInfo
 
     /// <summary>
     /// Enumerates secrets by name, wild cards are allowed.
     /// If no name is provided then all secrets are returned.
     /// If no vault is specified then all vaults are searched.
     /// </summary>
-    [Cmdlet(VerbsCommon.Get, "Secrets")]
+    [Cmdlet(VerbsCommon.Get, "SecretInfo")]
     [OutputType(typeof(PSObject))]
-    public sealed class GetSecretsCommand : SecretsCmdlet
+    public sealed class GetSecretInfoCommand : SecretsCmdlet
     {
         #region Parameters
 
