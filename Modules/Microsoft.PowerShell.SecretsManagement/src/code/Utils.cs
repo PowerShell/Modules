@@ -1368,6 +1368,11 @@ namespace Microsoft.PowerShell.SecretsManagement
         #region Properties
 
         /// <summary>
+        /// Name of extension vault.
+        /// </summary>
+        public string VaultName { get; }
+
+        /// <summary>
         /// Module name to qualify module commands.
         /// </summary>
         public string ModuleName { get; }
@@ -1420,9 +1425,10 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <summary>
         /// Initializes a new instance of ExtensionVaultModule
         /// </summary>
-        public ExtensionVaultModule(Hashtable vaultInfo)
+        public ExtensionVaultModule(string vaultName, Hashtable vaultInfo)
         {
             // Required module information.
+            VaultName = vaultName;
             ModuleName = (string) vaultInfo[ModuleNameStr];
             ModulePath = (string) vaultInfo[ModulePathStr];
             HaveGetCommand = (bool) vaultInfo[HaveGetCmdletStr];
@@ -1941,7 +1947,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 {
                     _vaultCache.Add(
                         key: vaultKey, 
-                        value: new ExtensionVaultModule((Hashtable) _vaultInfoCache[vaultKey]));
+                        value: new ExtensionVaultModule(vaultKey, (Hashtable) _vaultInfoCache[vaultKey]));
                 }
             }
         }

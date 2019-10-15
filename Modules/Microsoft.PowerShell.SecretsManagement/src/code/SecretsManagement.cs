@@ -635,11 +635,12 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
 
                 var extensionModule = GetExtensionVault(Vault);
-                WriteObject(
+                WriteResults(
+                    Vault,
                     extensionModule.InvokeGetSecret(
                         cmdlet: this,
                         name: Name));
-
+                
                 return;
             }
 
@@ -648,7 +649,8 @@ namespace Microsoft.PowerShell.SecretsManagement
             {
                 try
                 {
-                    WriteObject(
+                    WriteResults(
+                        extensionModule.VaultName,
                         extensionModule.InvokeGetSecret(
                             cmdlet: this,
                             name: Name));
@@ -672,6 +674,18 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Private methods
 
+        private void WriteResults(string vaultName,
+            PSDataCollection<PSObject> results)
+        {
+            foreach (dynamic item in results)
+            {
+                WritePSObject(
+                    name: item.Name,
+                    value: item.Value,
+                    vaultName: vaultName);
+            }
+        }
+
         private void SearchLocalStore(string name)
         {
             // Search through the built-in local vault.
@@ -691,23 +705,28 @@ namespace Microsoft.PowerShell.SecretsManagement
                         continue;
                     }
 
-                    var psObject = new PSObject();
-                    psObject.Members.Add(
-                        new PSNoteProperty(
-                            "Name", 
-                            pair.Key));
-                    psObject.Members.Add(
-                        new PSNoteProperty(
-                            "Value",
-                            pair.Value));
-                    psObject.Members.Add(
-                        new PSNoteProperty(
-                            "Vault",
-                            RegisterSecretsVaultCommand.BuiltInLocalVault));
-
-                    WriteObject(psObject);
+                    WritePSObject(
+                        name: pair.Key,
+                        value: pair.Value,
+                        vaultName: RegisterSecretsVaultCommand.BuiltInLocalVault);
                 }
             }
+        }
+
+        private void WritePSObject(
+            string name,
+            object value,
+            string vaultName)
+        {
+            var psObject = new PSObject();
+            psObject.Members.Add(
+                new PSNoteProperty("Name", name));
+            psObject.Members.Add(
+                new PSNoteProperty("Value", value));
+            psObject.Members.Add(
+                new PSNoteProperty("Vault", vaultName));
+
+            WriteObject(psObject);
         }
 
         #endregion
