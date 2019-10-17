@@ -1282,6 +1282,142 @@ namespace Microsoft.PowerShell.SecretsManagement
     #endregion
 #endif
 
+    #region SecretsManagementExtension class
+
+    /// <summary>
+    /// Abstract class which SecretsManagement extension vault modules will implement
+    /// to provide secret management functions for plugin local or remote vaults.
+    /// </summary>
+    public abstract class SecretsManagementExtension
+    {
+        #region Properties
+
+        /// <summary>
+        /// Name of the registered vault associated with this extension instance.
+        /// </summary>
+        public string VaultName { get; }
+
+        #endregion
+
+        #region Constructor
+
+        private SecretsManagementExtension() { }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SecretsManagementExtension"/> class.
+        /// </summary>
+        public SecretsManagementExtension(string vaultName)
+        {
+            if (string.IsNullOrEmpty(vaultName))
+            {
+                throw new ArgumentNullException("vaultName");
+            }
+
+            VaultName = vaultName;
+        }
+
+        #endregion
+
+        #region Abstract methods
+
+        /// <summary>
+        /// Adds a secret to the vault.
+        /// Currently supported secret types are:
+        ///     PSCredential
+        ///     SecureString
+        ///     String
+        ///     Hashtable
+        ///     byte[]
+        /// </summary>
+        /// <param name="name">Name under which secret will be stored.</param>
+        /// <param name="secret">Secret to be stored.</param>
+        /// <param name="error">Optional exception object on failure.</param>
+        /// <returns>True on success.</returns>
+        public abstract bool SetSecret(
+            string name,
+            object secret,
+            out Exception error);
+
+        /// <summary>
+        /// Gets a secret from the vault.
+        /// </summary>
+        /// <param name="name">Name of the secret to retrieve.</param>
+        /// <param name="error">Optional exception object on failure.</param>
+        /// <returns>Secret object retrieved from the vault.  Null returned if not found.</returns>
+        public abstract object GetSecret(
+            string name,
+            out Exception error);
+        
+        /// <summary>
+        /// Removes a secret from the vault.
+        /// </summary>
+        /// <param name="name">Name of the secret to remove.</param>
+        /// <param name="error">Optional exception object on failure.</param>
+        /// <returns>True on success.</returns>
+        public abstract bool RemoveSecret(
+            string name,
+            out Exception error);
+
+        /// <summary>
+        /// Returns a list of key/value pairs for each found vault secret, where
+        ///     key   (string): is the name of the secret.
+        ///     value (object): is the corresponding secret object.
+        /// </summary>
+        /// <param name="filter">
+        /// A string, including wildcard characters, used to search secret names.
+        /// A null value, empty string, or "*" will return all vault secrets.
+        /// </param>
+        /// <param name="secrets">Array of returned secret name/value pairs.</param>
+        /// <param name="error">Optional exception object on failure.</param>
+        public abstract void EnumerateSecrets(
+            string filter,
+            out KeyValuePair<string, object>[] secrets,
+            out Exception error);
+
+        #endregion
+
+        #region Helper methods
+
+        /// <summay>
+        /// Returns a key/value dictionary of parameters stored in the local secure store.
+        /// This can be used to store any secrets needed access underlying vault.
+        /// </summary>
+        /// <param name="paramsName">Name of stored parameters</param>
+        /// <param name="error">Optional exception object on failure.</param>
+        /// <returns>Dictionary of retrieved parameter key/value pairs or null if not found.</returns>
+        internal IReadOnlyDictionary<string, object> GetParameters(
+            string paramsName,
+            out Exception error)
+        {
+            // Construct unique name for parameters based on vault name.
+            //  e.g., "_SPT_VaultName_ParamsName_"
+            var fullName = "_SPT_" + VaultName + "_" + paramsName + "_";
+            int errorCode = 0;
+            if (!LocalSecretStore.ReadObject(
+                    paramsName,
+                    out object outObject,
+                    ref errorCode))
+            {
+                var msg = LocalSecretStore.GetErrorMessage(errorCode);
+                error = new InvalidOperationException(msg);
+                return null;
+            }
+            
+            error = null;
+            var parametersHash = outObject as Hashtable;
+            var parameters = new Dictionary<string, object>(parametersHash.Count);
+            foreach (var key in parametersHash.Keys)
+            {
+                parameters.Add((string)key, parametersHash[key]);
+            }
+            return new ReadOnlyDictionary<string, object>(parameters);
+        }
+
+        #endregion
+    }
+
+    #endregion
+
     #region Extension vault module class
 
     /// <summary>

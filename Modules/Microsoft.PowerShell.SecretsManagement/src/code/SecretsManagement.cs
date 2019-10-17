@@ -335,6 +335,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             if (parameters != null)
             {
                 // Generate unique name for parameters based on vault name.
+                //  e.g., "_SPT_VaultName_ParamsName_"
                 parametersName = ScriptParamTag + Name + "_" + key + "_";
 
                 // Store parameters in built-in local secure vault.
