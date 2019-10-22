@@ -1379,42 +1379,8 @@ namespace Microsoft.PowerShell.SecretsManagement
             IReadOnlyDictionary<string, object> parameters,
             out Exception error);
 
-        #endregion
-
-        #region Helper methods
-
-        /// <summay>
-        /// Returns a key/value dictionary of parameters stored in the local secure store.
-        /// This can be used to store any secrets needed access underlying vault.
-        /// </summary>
-        /// <param name="error">Optional exception object on failure.</param>
-        /// <returns>Dictionary of retrieved parameter key/value pairs or null if not found.</returns>
-        internal IReadOnlyDictionary<string, object> GetParameters(
-            out Exception error)
-        {
-            // Construct unique name for parameters based on vault name.
-            //  e.g., "_SPT_Parameters_VaultName_"
-            var paramsName = RegisterSecretsVaultCommand.ScriptParamTag + VaultName + "_";
-            int errorCode = 0;
-            if (!LocalSecretStore.ReadObject(
-                    paramsName,
-                    out object outObject,
-                    ref errorCode))
-            {
-                var msg = LocalSecretStore.GetErrorMessage(errorCode);
-                error = new InvalidOperationException(msg);
-                return null;
-            }
-            
-            error = null;
-            var parametersHash = outObject as Hashtable;
-            var parameters = new Dictionary<string, object>(parametersHash.Count);
-            foreach (var key in parametersHash.Keys)
-            {
-                parameters.Add((string)key, parametersHash[key]);
-            }
-            return new ReadOnlyDictionary<string, object>(parameters);
-        }
+        // TODO: Add this?
+        // public abstract void StopOperation();
 
         #endregion
     }

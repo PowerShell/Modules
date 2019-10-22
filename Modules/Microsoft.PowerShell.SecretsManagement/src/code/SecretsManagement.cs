@@ -695,6 +695,17 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         protected override void EndProcessing()
         {
+            // Wild card characters are not supported in this cmdlet.
+            if (WildcardPattern.ContainsWildcardCharacters(Name))
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        new ArgumentException("Name parameter cannot contain wildcard characters."),
+                        "GetSecretNoWildcardCharsAllowed",
+                        ErrorCategory.InvalidArgument,
+                        this));
+            }
+
             // Search single vault.
             if (!string.IsNullOrEmpty(Vault))
             {
@@ -844,6 +855,8 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         protected override void EndProcessing()
         {
+            var secretToWrite = (Secret is PSObject psObject) ? psObject.BaseObject : Secret;
+
             // Add to specified vault.
             if (!string.IsNullOrEmpty(Vault))
             {
@@ -872,7 +885,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 // Add new secret to vault.
                 extensionModule.InvokeSetSecret(
                     name: Name,
-                    secret: Secret,
+                    secret: secretToWrite,
                     cmdlet: this);
                 
                 return;
@@ -901,7 +914,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             errorCode = 0;
             if (!LocalSecretStore.WriteObject(
                 name: Name,
-                objectToWrite: (Secret is PSObject psObject) ? psObject.BaseObject : Secret,
+                objectToWrite: secretToWrite,
                 ref errorCode))
             {
                 var errorMessage = LocalSecretStore.GetErrorMessage(errorCode);
