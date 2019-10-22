@@ -700,7 +700,10 @@ namespace Microsoft.PowerShell.SecretsManagement
             {
                 if (Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
                 {
-                    SearchLocalStore(Name);
+                    if (!SearchLocalStore(Name))
+                    {
+                        WriteNotFoundError();
+                    }
                     return;
                 }
 

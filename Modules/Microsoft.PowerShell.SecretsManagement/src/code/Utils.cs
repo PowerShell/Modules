@@ -8,12 +8,10 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Management.Automation;
-using System.Management.Automation.Remoting.Internal;
 using System.Management.Automation.Runspaces;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
-using System.Threading;
 
 using Dbg = System.Diagnostics.Debug;
 
@@ -1708,139 +1706,6 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region PowerShellInvoker
-
-    internal static class PowerShellInvoker
-    {
-        #region Members
-
-        private static readonly object _syncObject;
-        private static System.Management.Automation.PowerShell _powershell;
-        
-        #endregion
-
-        #region Constructor
-
-        static PowerShellInvoker()
-        {
-            _syncObject = new object();
-            _powershell = System.Management.Automation.PowerShell.Create();
-        }
-
-        #endregion
-
-        #region Public methods
-
-        // TODO: Create a PowerShellInvoker instance (not static) and assign to static
-        // variable.  Then let cmdlet variable reference be settable and still used in
-        // the data stream handler enclosures.
-        public static PSDataCollection<PSObject> InvokeScript(
-            PSCmdlet cmdlet,
-            string script,
-            object[] args)
-        {
-            using (var powershell = System.Management.Automation.PowerShell.Create())
-            using (var waitData = new AutoResetEvent(false))
-            using (var dataStream = new PSDataCollection<PSStreamObject>())
-            {
-                // Handle streaming data
-                dataStream.DataAdded += (sender, dataStreamArgs) => {
-                    waitData.Set();
-                };
-                powershell.Streams.Error.DataAdded += (sender, errorStreamArgs) => {
-                    foreach (var error in powershell.Streams.Error.ReadAll())
-                    {
-                        dataStream.Add(
-                            new PSStreamObject(PSStreamObjectType.Error, error));
-                    }
-                };
-                powershell.Streams.Warning.DataAdded += (sender, warningStreamArgs) => {
-                    foreach (var warning in powershell.Streams.Warning.ReadAll())
-                    {
-                        dataStream.Add(
-                            new PSStreamObject(PSStreamObjectType.Warning, warning.Message));
-                    }
-                };
-                powershell.Streams.Verbose.DataAdded += (sender, verboseStreamArgs) => {
-                    foreach (var verboseItem in powershell.Streams.Verbose.ReadAll())
-                    {
-                        dataStream.Add(
-                            new PSStreamObject(PSStreamObjectType.Verbose, verboseItem.Message));
-                    }
-                };
-
-                powershell.AddScript(script).AddParameters(args);
-                var async = powershell.BeginInvoke<PSObject>(null);
-
-                // Wait for script to complete while writing streaming data on cmdlet thread.
-                var waitHandles = new WaitHandle[]
-                {
-                    waitData,
-                    async.AsyncWaitHandle
-                };
-                while (true)
-                {
-                    var index = WaitHandle.WaitAny(waitHandles);
-                    switch (index)
-                    {
-                        case 0:
-                            // Data available
-                            foreach (var item in dataStream.ReadAll())
-                            {
-                                item.WriteStreamObject(cmdlet: cmdlet, overrideInquire: true);
-                            }
-                            break;
-
-                        case 1:
-                            // Script execution complete
-                            var results = powershell.EndInvoke(async);
-                            return results;
-
-                        default:
-                            return null;
-                    }
-                }
-            }
-        }
-
-        public static Collection<T> InvokeScript<T>(
-            string script,
-            object[] args,
-            out PSDataStreams dataStreams,
-            bool mergeDataStreamsToOutput = false)
-        {
-            lock (_syncObject)
-            {
-                // Recreate _powershell/Runspace if needed.
-                if ((_powershell.InvocationStateInfo.State != PSInvocationState.Completed && 
-                     _powershell.InvocationStateInfo.State != PSInvocationState.NotStarted)
-                     || (_powershell.Runspace.RunspaceStateInfo.State != RunspaceState.Opened))
-                {
-                    _powershell.Dispose();
-                    _powershell = System.Management.Automation.PowerShell.Create();
-                }
-
-                _powershell.Commands.Clear();
-                _powershell.Streams.ClearStreams();
-                _powershell.Runspace.ResetRunspaceState();
-
-                _powershell.AddScript(script).AddParameters(args);
-                if (mergeDataStreamsToOutput)
-                {
-                    _powershell.Commands.Commands[0].MergeMyResults(PipelineResultTypes.All, PipelineResultTypes.Output);
-                }
-
-                var results = _powershell.Invoke<T>();
-                dataStreams = _powershell.Streams;
-                return results;
-            }
-        }
-
-        #endregion
-    }
-
-    #endregion
-
     #region RegisteredVaultCache
 
     internal static class RegisteredVaultCache
@@ -2033,7 +1898,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         private static Hashtable ConvertJsonToHashtable(string json)
         {
-            var psObject = PowerShellInvoker.InvokeScript<PSObject>(
+            var psObject = PowerShellInvoker.InvokeScript(
                 script: ConvertJsonToHashtableScript,
                 args: new object[] { json },
                 dataStreams: out PSDataStreams _);
@@ -2084,7 +1949,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <param>Hashtable containing registered vault information.</param>
         private static void WriteSecretVaultRegistry(Hashtable dataToWrite)
         {
-            var psObject = PowerShellInvoker.InvokeScript<PSObject>(
+            var psObject = PowerShellInvoker.InvokeScript(
                 script: @"param ([hashtable] $dataToWrite) ConvertTo-Json $dataToWrite",
                 args: new object[] { dataToWrite },
                 dataStreams: out PSDataStreams _);
@@ -2122,6 +1987,47 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             Dbg.Assert(false, "Unable to write vault registry file!");
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region PowerShellInvoker
+
+    internal static class PowerShellInvoker
+    {
+        #region Private members
+
+        // Ensure there is one instance of PowerShell per thread by using [ThreadStatic]
+        // attribute to store each local thread instance.
+        [ThreadStatic]
+        private static System.Management.Automation.PowerShell _powerShell = System.Management.Automation.PowerShell.Create();
+
+        #endregion
+
+        #region Public methods
+
+        public static Collection<PSObject> InvokeScript(
+            string script,
+            object[] args,
+            out PSDataStreams dataStreams)
+        {
+            if ((_powerShell.InvocationStateInfo.State != PSInvocationState.Completed && _powerShell.InvocationStateInfo.State != PSInvocationState.NotStarted)
+            || (_powerShell.Runspace.RunspaceStateInfo.State != RunspaceState.Opened))
+            {
+                _powerShell.Dispose();
+                _powerShell = System.Management.Automation.PowerShell.Create();
+            }
+
+            _powerShell.Commands.Clear();
+            _powerShell.Streams.ClearStreams();
+            _powerShell.Runspace.ResetRunspaceState();
+
+            var results = _powerShell.AddScript(script).AddParameters(args).Invoke();
+            dataStreams = _powerShell.Streams;
+            return results;
         }
 
         #endregion
