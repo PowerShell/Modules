@@ -351,6 +351,69 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
         }
 
+        public static bool EnumerateObjectInfo(
+            string filter,
+            out KeyValuePair<string, string>[] outObjectInfos,
+            ref int errorCode)
+        {
+            if (!EnumerateBlobs(
+                PrependTag(filter),
+                out EnumeratedBlob[] outBlobs,
+                ref errorCode))
+            {
+                outObjectInfos = null;
+                return false;
+            }
+
+            var outList = new List<KeyValuePair<string, string>>(outBlobs.Length);
+            foreach (var item in outBlobs)
+            {
+                switch (item.TypeName)
+                {
+                    case ByteArrayType:
+                        outList.Add(
+                            new KeyValuePair<string, string>(
+                                RemoveTag(item.Name),
+                                nameof(SecretsManagementExtension.SupportedTypes.ByteArray)));
+                        break;
+
+                    case StringType:
+                        outList.Add(
+                            new KeyValuePair<string, string>(
+                                RemoveTag(item.Name),
+                                nameof(SecretsManagementExtension.SupportedTypes.String)));
+                        break;
+
+                    case SecureStringType:
+                        outList.Add(
+                            new KeyValuePair<string, string>(
+                                RemoveTag(item.Name),
+                                nameof(SecretsManagementExtension.SupportedTypes.SecureString)));
+                        break;
+
+                    case PSCredentialType:
+                        outList.Add(
+                            new KeyValuePair<string, string>(
+                                RemoveTag(item.Name),
+                                nameof(SecretsManagementExtension.SupportedTypes.PSCredential)));
+                        break;
+
+                    case HashtableType:
+                        outList.Add(
+                            new KeyValuePair<string, string>(
+                                RemoveTag(item.Name),
+                                nameof(SecretsManagementExtension.SupportedTypes.Hashtable)));
+                        break;
+                }
+
+                // Delete local copy of blob.
+                ZeroOutData(item.Data);
+            }
+
+            outObjectInfos = outList.ToArray();
+            return true;
+        }
+        
         /// <summary>
         /// Enumerate objects in the vault, based on the filter string, for the current user.
         /// <summary>
@@ -608,6 +671,14 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             data = null;
             return false;
+        }
+
+        private static void ZeroOutData(byte[] data)
+        {
+            for (int i = 0; i < data.Length; i++)
+            {
+                data[i] = 0;
+            }
         }
 
         #endregion
@@ -922,11 +993,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
                 finally
                 {
-                    // Zero out SecureString data.
-                    for (int i = 0; i < data.Length; i++)
-                    {
-                        data[i] = 0;
-                    }
+                    ZeroOutData(data);
                 }
             }
             
@@ -949,11 +1016,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
             finally
             {
-                // Zero out blob data
-                for (int i=0; i < ssBlob.Length; i++)
-                {
-                    ssBlob[0] = 0;
-                }
+                ZeroOutData(ssBlob);
             }
 
             outSecureString = null;
@@ -1017,19 +1080,11 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
                 finally
                 {
-                    // Zero out SecureString data
-                    for (int i = 0; i < ssData.Length; i++)
-                    {
-                        ssData[i] = 0;
-                    }
-                    
-                    // Zero out blob data
+                    ZeroOutData(ssData);
+
                     if (blob != null)
                     {
-                        for (int i = 0; i < blob.Length; i++)
-                        {
-                            blob[i] = 0;
-                        }
+                        ZeroOutData(blob);
                     }
                 }
             }
@@ -1068,17 +1123,11 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
             finally
             {
-                // Zero out data
-                for (int i = 0; i < blob.Length; i++)
-                {
-                    blob[i] = 0;
-                }
+                ZeroOutData(blob);
+                
                 if (ssData != null)
                 {
-                    for (int i = 0; i < ssData.Length; i++)
-                    {
-                        ssData[i] = 0;
-                    }
+                    ZeroOutData(ssData);
                 }
             }
 
@@ -1215,17 +1264,15 @@ namespace Microsoft.PowerShell.SecretsManagement
             var hashtable = new Hashtable();
             foreach (var entryName in entryNames)
             {
-                if (!ReadObjectImpl(
+                if (ReadObjectImpl(
                     entryName,
                     out object outObject,
                     ref errorCode))
                 {
-                    return false;
-                }
-
-                hashtable.Add(
+                    hashtable.Add(
                     RecoverKeyname(entryName, name),
                     outObject);
+                }
             }
 
             outHashtable = hashtable;
@@ -1288,6 +1335,20 @@ namespace Microsoft.PowerShell.SecretsManagement
     /// </summary>
     public abstract class SecretsManagementExtension
     {
+        #region Enums
+
+        public enum SupportedTypes
+        {
+            Unknown = 0,
+            ByteArray,
+            String,
+            SecureString,
+            PSCredential,
+            Hashtable
+        }
+
+        #endregion
+
         #region Properties
 
         /// <summary>
@@ -1373,8 +1434,8 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </param>
         /// <param name="parameters">Optional additional parameters.</param>
         /// <param name="error">Optional exception object on failure.</param>
-        /// <returns>Array of secret name/value pairs.</returns>
-        public abstract KeyValuePair<string, object>[] EnumerateSecrets(
+        /// <returns>Array of secret name/typeName pairs.</returns>
+        public abstract KeyValuePair<string, string>[] EnumerateSecretInfo(
             string filter,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error);
@@ -1545,19 +1606,50 @@ namespace Microsoft.PowerShell.SecretsManagement
             object secret,
             PSCmdlet cmdlet)
         {
+            // Ensure the module has been imported so that the extension
+            // binary assembly is loaded.
+            ImportPSModule(cmdlet);
+
             var parameters = GetParamsFromStore(SecretParamsName);
-            if (!_vaultExtentsion.Value.SetSecret(
-                name: name,
-                secret: secret,
-                parameters: parameters,
-                out Exception error))
+            bool success = false;
+            Exception error = null;
+
+            try
             {
+                success = _vaultExtentsion.Value.SetSecret(
+                    name: name,
+                    secret: secret,
+                    parameters: parameters,
+                    out error);
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
+
+            if (!success || error != null)
+            {
+                if (error == null)
+                {
+                    var msg = string.Format(
+                        CultureInfo.InvariantCulture, 
+                        "Could not add secret {0} to vault {1}.",
+                        name, VaultName);
+
+                    error = new InvalidOperationException(msg);
+                }
+
                 cmdlet.WriteError(
                     new ErrorRecord(
                         error,
                         "InvokeSetSecretError",
                         ErrorCategory.InvalidOperation,
                         this));
+            }
+            else
+            {
+                cmdlet.WriteVerbose(
+                    string.Format("Secret {0} was successfully added to vault {1}.", name, VaultName));
             }
         }
 
@@ -1568,11 +1660,25 @@ namespace Microsoft.PowerShell.SecretsManagement
             string name,
             PSCmdlet cmdlet)
         {
+            // Ensure the module has been imported so that the extension
+            // binary assembly is loaded.
+            ImportPSModule(cmdlet);
+
             var parameters = GetParamsFromStore(SecretParamsName);
-            var secret = _vaultExtentsion.Value.GetSecret(
-                name: name,
-                parameters: parameters,
-                out Exception error);
+            object secret = null;
+            Exception error = null;
+            
+            try
+            {
+                secret = _vaultExtentsion.Value.GetSecret(
+                    name: name,
+                    parameters: parameters,
+                    out error);
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
 
             if (error != null)
             {
@@ -1594,12 +1700,38 @@ namespace Microsoft.PowerShell.SecretsManagement
             string name,
             PSCmdlet cmdlet)
         {
+            // Ensure the module has been imported so that the extension
+            // binary assembly is loaded.
+            ImportPSModule(cmdlet);
+
             var parameters = GetParamsFromStore(SecretParamsName);
-            if (!_vaultExtentsion.Value.RemoveSecret(
-                name: name,
-                parameters: parameters,
-                out Exception error))
+            var success = false;
+            Exception error = null;
+
+            try
             {
+                success = _vaultExtentsion.Value.RemoveSecret(
+                    name: name,
+                    parameters: parameters,
+                    out error);
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
+
+            if (!success || error != null)
+            {
+                if (error == null)
+                {
+                    var msg = string.Format(
+                        CultureInfo.InvariantCulture, 
+                        "Could not remove secret {0} from vault {1}.",
+                        name, VaultName);
+
+                    error = new InvalidOperationException(msg);
+                }
+
                 cmdlet.WriteError(
                     new ErrorRecord(
                         error,
@@ -1607,24 +1739,53 @@ namespace Microsoft.PowerShell.SecretsManagement
                         ErrorCategory.InvalidOperation,
                         this));
             }
+            else
+            {
+                cmdlet.WriteVerbose(
+                    string.Format("Secret {0} was successfully removed from vault {1}.", name, VaultName));
+            }
         }
 
-        public KeyValuePair<string, object>[] InvokeEnumerateSecrets(
+        public KeyValuePair<string, string>[] InvokeEnumerateSecretInfo(
             string filter,
             PSCmdlet cmdlet)
         {
+            // Ensure the module has been imported so that the extension
+            // binary assembly is loaded.
+            ImportPSModule(cmdlet);
+
             var parameters = GetParamsFromStore(SecretParamsName);
-            var results = _vaultExtentsion.Value.EnumerateSecrets(
-                filter: filter,
-                parameters: parameters,
-                out Exception error);
+            KeyValuePair<string, string>[] results = null;
+            Exception error = null;
+
+            try
+            {
+                results = _vaultExtentsion.Value.EnumerateSecretInfo(
+                    filter: filter,
+                    parameters: parameters,
+                    out error);
+            }
+            catch (Exception ex)
+            {
+                error = ex;
+            }
             
             if (error != null)
             {
+                if (error == null)
+                {
+                    var msg = string.Format(
+                        CultureInfo.InvariantCulture, 
+                        "Could not enumerate secret information from vault {0}.",
+                        VaultName);
+
+                    error = new InvalidOperationException(msg);
+                }
+
                 cmdlet.WriteError(
                     new ErrorRecord(
                         error,
-                        "InvokeEnumerateSecretsError",
+                        "InvokeEnumerateSecretInfoError",
                         ErrorCategory.InvalidOperation,
                         this));
             }
@@ -1643,6 +1804,17 @@ namespace Microsoft.PowerShell.SecretsManagement
         #endregion
 
         #region Private methods
+
+        internal void ImportPSModule(PSCmdlet cmdlet)
+        {
+            cmdlet.InvokeCommand.InvokeScript(
+                script: @"
+                    param ([string] $ModulePath)
+
+                    Import-Module -Name $ModulePath -Scope Local
+                ",
+                args: new object[] { this.ModulePath });
+        }
 
         private static IReadOnlyDictionary<string, object> GetParamsFromStore(string paramsName)
         {

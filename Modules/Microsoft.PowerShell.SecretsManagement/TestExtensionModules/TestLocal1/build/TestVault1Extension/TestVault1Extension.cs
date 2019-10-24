@@ -1,9 +1,11 @@
 ﻿using Microsoft.PowerShell.SecretsManagement;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Management.Automation;
 using System.Management.Automation.Runspaces;
+using System.Security;
 
 namespace TestVault1Extension
 {
@@ -80,7 +82,7 @@ namespace TestVault1Extension
             return true;
         }
 
-        public override KeyValuePair<string, object>[] EnumerateSecrets(
+        public override KeyValuePair<string, string>[] EnumerateSecretInfo(
             string filter,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
@@ -92,13 +94,42 @@ namespace TestVault1Extension
 
             error = dataStreams.Error.Count > 0 ? dataStreams.Error[0].Exception : null;
 
-            List<KeyValuePair<string, object>> list = new List<KeyValuePair<string, object>>(results.Count);
+            var list = new List<KeyValuePair<string, string>>(results.Count);
             foreach (dynamic result in results)
             {
+                string typeName;
+                var resultValue = (result.Value is PSObject) ? ((PSObject)result.Value).BaseObject : result.Value;
+                switch (resultValue)
+                {
+                    case byte[] blob:
+                        typeName = nameof(SupportedTypes.ByteArray);
+                        break;
+
+                    case string str:
+                        typeName = nameof(SupportedTypes.String);
+                        break;
+
+                    case SecureString sstr:
+                        typeName = nameof(SupportedTypes.SecureString);
+                        break;
+
+                    case PSCredential cred:
+                        typeName = nameof(SupportedTypes.PSCredential);
+                        break;
+
+                    case Hashtable ht:
+                        typeName = nameof(SupportedTypes.Hashtable);
+                        break;
+
+                    default:
+                        typeName = nameof(SupportedTypes.Unknown);
+                        break;
+                }
+
                 list.Add(
-                    new KeyValuePair<string, object>(
+                    new KeyValuePair<string, string>(
                         key: result.Name,
-                        value: result.Value));
+                        value: typeName));
             }
 
             return list.ToArray();
@@ -172,7 +203,6 @@ namespace TestVault1Extension
                     Write-Output([pscustomobject] @{
                         Name = $secretName
                         Value = $secret
-                        Vault = ""TestVault5""
                     })
                 }
             }

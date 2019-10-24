@@ -79,10 +79,8 @@ namespace AKVaultExtension
             {
                 if ($pattern.IsMatch($vaultSecretInfo.Name))
                 {
-                    $secret = Az.KeyVault\Get-AzKeyVaultSecret -Name $vaultSecretInfo.Name -VaultName $VaultName
                     Write-Output ([pscustomobject] @{
-                        Name = $secret.Name
-                        Value = $secret.SecretValue
+                        Name = $vaultSecretInfo.Name
                     })
                 }
             }
@@ -181,7 +179,7 @@ namespace AKVaultExtension
             return (error == null);
         }
 
-        public override KeyValuePair<string, object>[] EnumerateSecrets(
+        public override KeyValuePair<string, string>[] EnumerateSecretInfo(
             string filter,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
@@ -194,7 +192,7 @@ namespace AKVaultExtension
                 subscriptionId: subscriptionId,
                 error: out error))
             {
-                return new KeyValuePair<string, object>[0];
+                return new KeyValuePair<string, string>[0];
             }
 
             var results = PowerShellInvoker.InvokeScript(
@@ -202,13 +200,13 @@ namespace AKVaultExtension
                 args: new object[] { filter, azkVaultName },
                 error: out error);
 
-            var list = new List<KeyValuePair<string, object>>(results.Count);
+            var list = new List<KeyValuePair<string, string>>(results.Count);
             foreach (dynamic result in results)
             {
                 list.Add(
-                    new KeyValuePair<string, object>(
+                    new KeyValuePair<string, string>(
                         key: result.Name,
-                        value: result.Value));
+                        value: nameof(SupportedTypes.SecureString)));
             }
 
             return list.ToArray();
