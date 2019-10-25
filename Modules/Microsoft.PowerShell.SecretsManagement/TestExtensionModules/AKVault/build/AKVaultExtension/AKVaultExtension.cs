@@ -179,7 +179,7 @@ namespace AKVaultExtension
             return (error == null);
         }
 
-        public override KeyValuePair<string, string>[] EnumerateSecretInfo(
+        public override KeyValuePair<string, string>[] GetSecretInfo(
             string filter,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)

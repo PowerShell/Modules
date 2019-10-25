@@ -215,21 +215,34 @@ namespace Microsoft.PowerShell.SecretsManagement
                     }
                 }
             }
-            if (implementingType == null)
+
+            // Check exported functions for script implementation of required abstract methods.
+            var hasGetSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Get-Secret");
+            var hasGetSecretInfoCmd = moduleInfo.ExportedFunctions.ContainsKey("Get-SecretInfo");
+            var hasSetSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Set-Secret");
+            var hasRemoveSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Remove-Secret");
+            var haveScriptFunctionImplementation = hasGetSecretCmd && hasGetSecretInfoCmd && hasSetSecretCmd && hasRemoveSecretCmd;
+
+            if (implementingType == null && !haveScriptFunctionImplementation)
             {
                 ThrowTerminatingError(
                     new ErrorRecord(
-                        new PSInvalidOperationException("Could not find an implementing type of SecretsManagementExtension."),
-                        "RegisterSecretsVaultCantFindImplementingType",
+                        new PSInvalidOperationException("Could not find an implementing type of SecretsManagementExtension, or the alternate four required script functions (Get-Secret, Get-SecretInfo, Set-Secret, Remove-Secret)."),
+                        "RegisterSecretsVaultCantFindImplementingTypeOrScriptFunctions",
                         ErrorCategory.ObjectNotFound,
                         this));
             }
+
             vaultInfo.Add(
                 key: ExtensionVaultModule.ImplementingTypeStr, 
                 value: new Hashtable() {
-                    { "AssemblyName", implementingType.Assembly.GetName().Name },
-                    { "TypeName", implementingType.FullName }
+                    { "AssemblyName", implementingType != null ? implementingType.Assembly.GetName().Name : string.Empty },
+                    { "TypeName", implementingType != null ? implementingType.FullName: string.Empty }
                 });
+
+            vaultInfo.Add(
+                key: ExtensionVaultModule.ImplementingFunctionsStr,
+                value: haveScriptFunctionImplementation);
 
             // Store the optional secret parameters
             StoreSecretParameters(
@@ -560,7 +573,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 var extensionModule = GetExtensionVault(Vault);
                 WriteResults(
                     Vault,
-                    extensionModule.InvokeEnumerateSecretInfo(
+                    extensionModule.InvokeGetSecretInfo(
                         filter: Name,
                         cmdlet: this));
                 
@@ -574,7 +587,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 {
                     WriteResults(
                         extensionModule.VaultName,
-                        extensionModule.InvokeEnumerateSecretInfo(
+                        extensionModule.InvokeGetSecretInfo(
                             filter: Name,
                             cmdlet: this));
                 }

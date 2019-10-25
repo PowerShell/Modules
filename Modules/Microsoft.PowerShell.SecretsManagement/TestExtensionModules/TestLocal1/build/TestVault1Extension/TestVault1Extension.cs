@@ -82,7 +82,7 @@ namespace TestVault1Extension
             return true;
         }
 
-        public override KeyValuePair<string, string>[] EnumerateSecretInfo(
+        public override KeyValuePair<string, string>[] GetSecretInfo(
             string filter,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
@@ -176,7 +176,7 @@ namespace TestVault1Extension
                     throw ""The Name parameter cannot contain any wild card characters.""
                 }
 
-                $filePath = Join-Path -Path(Get-Path) -ChildPath ""${Name}.xml""
+                $filePath = Join-Path -Path (Get-Path) -ChildPath ""${Name}.xml""
     
                 if (! (Test-Path -Path $filePath))
                 {
@@ -219,7 +219,7 @@ namespace TestVault1Extension
                     [object] $Secret
                 )
 
-                $filePath = Join-Path -Path(Get-Path) ""${Name}.xml""
+                $filePath = Join-Path -Path (Get-Path) ""${Name}.xml""
                 if (Test-Path -Path $filePath)
                 {
                     Write-Error ""Secret name, $Name, is already used in this vault.""
@@ -235,7 +235,7 @@ namespace TestVault1Extension
                     [string] $Name
                 )
 
-                $filePath = Join-Path -Path(Get-Path) ""${Name}.xml""
+                $filePath = Join-Path -Path (Get-Path) ""${Name}.xml""
                 if (! (Test-Path -Path $filePath))
                 {
                     Write-Error ""The secret $Name does not exist""
