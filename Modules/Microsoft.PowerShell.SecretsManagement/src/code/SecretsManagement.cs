@@ -38,7 +38,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <summary>
         /// Optional name of secret parameters used by vault module.
         /// </summary>
-        public string SecretParamsName { get; }
+        public string VaultParametersName { get; }
 
         /// <summary>
         /// Name of assembly implementing the SecretsManagement type.
@@ -61,7 +61,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             Name = name;
             ModuleName = vaultInfo.ModuleName;
             ModulePath = vaultInfo.ModulePath;
-            SecretParamsName = vaultInfo.SecretParamsName;
+            VaultParametersName = vaultInfo.VaultParametersName;
             ImplementingTypeAssemblyName = vaultInfo.ImplementingTypeAssemblyName;
             ImplementingTypeName = vaultInfo.ImplementingTypeName;
         }
@@ -114,12 +114,12 @@ namespace Microsoft.PowerShell.SecretsManagement
         public string ModulePath { get; set; }
 
         /// <summary>
-        /// Gets or sets an optional Hashtable of secrets by name/value pairs.
+        /// Gets or sets an optional Hashtable of parameters by name/value pairs.
         /// The hashtable is stored securely in the local store, and is made available to the 
-        /// SecretsManagementExtension implementing type.
+        /// SecretsManagementExtension implementing type or module script functions.
         /// </summary>
         [Parameter]
-        public Hashtable SecretParameters { get; set; }
+        public Hashtable VaultParameters { get; set; }
 
         #endregion
 
@@ -245,10 +245,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 value: haveScriptFunctionImplementation);
 
             // Store the optional secret parameters
-            StoreSecretParameters(
+            StoreVaultParameters(
                 vaultInfo: vaultInfo,
                 vaultName: Name,
-                parameters: SecretParameters);
+                parameters: VaultParameters);
 
             // Register new secret vault information.
             RegisteredVaultCache.Add(
@@ -260,7 +260,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Private methods
 
-        private void StoreSecretParameters(
+        private void StoreVaultParameters(
             Hashtable vaultInfo,
             string vaultName,
             Hashtable parameters)
@@ -296,7 +296,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             
             // Add parameters store name to the vault registry information.
             vaultInfo.Add(
-                key: ExtensionVaultModule.SecretParametersStr,
+                key: ExtensionVaultModule.VaultParametersStr,
                 value: parametersName);
         }
 
@@ -382,7 +382,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             // Remove any parameter secrets from built-in local store.
-            RemoveParamSecrets(removedVaultInfo, ExtensionVaultModule.SecretParametersStr);
+            RemoveParamSecrets(removedVaultInfo, ExtensionVaultModule.VaultParametersStr);
         }
 
         #endregion
@@ -417,6 +417,12 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #endregion
     }
+
+    #endregion
+
+    #region Set-VaultParameters
+
+    // TODO: Implement updating vault parameters.
 
     #endregion
 
@@ -497,6 +503,14 @@ namespace Microsoft.PowerShell.SecretsManagement
                 (!string.IsNullOrEmpty(Name)) ? Name : "*", 
                 WildcardOptions.IgnoreCase);
 
+            // Always list the 'BuiltInLocalVault' first
+            if (namePattern.IsMatch(RegisterSecretsVaultCommand.BuiltInLocalVault))
+            {
+                WriteObject(
+                    new SecretsVaultInfo(RegisterSecretsVaultCommand.BuiltInLocalVault));
+            }
+
+            // Then list all extension vaults in sorted order.
             var vaultExtensions = RegisteredVaultCache.VaultExtensions;
             foreach (var vaultName in vaultExtensions.Keys)
             {
@@ -510,13 +524,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                                 extensionModule));
                     }
                 }
-            }
-
-            // Always include the 'BuiltInLocalVault'
-            if (namePattern.IsMatch(RegisterSecretsVaultCommand.BuiltInLocalVault))
-            {
-                WriteObject(
-                    new SecretsVaultInfo(RegisterSecretsVaultCommand.BuiltInLocalVault));
             }
         }
 
@@ -580,7 +587,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 return;
             }
 
-            // Search through all extension vaults.
+            // Search the local built in store first.
+            SearchLocalStore(Name);
+
+            // Then search through all extension vaults.
             foreach (var extensionModule in RegisteredVaultCache.VaultExtensions.Values)
             {
                 try
@@ -601,9 +611,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                             this));
                 }
             }
-
-            // Lastly, search the local built in store.
-            SearchLocalStore(Name);
         }
 
         #endregion
@@ -747,7 +754,13 @@ namespace Microsoft.PowerShell.SecretsManagement
                 return;
             }
 
-            // Search through all vaults.
+            // First search the built-in local vault.
+            if (SearchLocalStore(Name))
+            {
+                return;
+            }
+
+            // Then search through all extension vaults.
             foreach (var extensionModule in RegisteredVaultCache.VaultExtensions.Values)
             {
                 try
@@ -771,12 +784,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                             ErrorCategory.InvalidOperation,
                             this));
                 }
-            }
-
-            // Finally search the built-in local vault.
-            if (SearchLocalStore(Name))
-            {
-                return;
             }
 
             WriteNotFoundError();
@@ -868,7 +875,8 @@ namespace Microsoft.PowerShell.SecretsManagement
             var secretToWrite = (Secret is PSObject psObject) ? psObject.BaseObject : Secret;
 
             // Add to specified vault.
-            if (!string.IsNullOrEmpty(Vault))
+            if (!string.IsNullOrEmpty(Vault) && 
+                !Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 var extensionModule = GetExtensionVault(Vault);
                 

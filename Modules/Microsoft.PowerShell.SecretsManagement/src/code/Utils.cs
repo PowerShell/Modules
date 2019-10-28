@@ -1440,6 +1440,17 @@ namespace Microsoft.PowerShell.SecretsManagement
             IReadOnlyDictionary<string, object> parameters,
             out Exception error);
 
+        /// <summary>
+        /// Validates operation of the registered extension. 
+        /// </summary>
+        /// <param name="parameters">Optional parameters for validation.</param>
+        /// <param name="error">Optional exception object on failure.</param>
+        /// <returns>True if extension operates as expected.</returns>
+        // TODO: Add this.
+        //public abstract bool ValidateExtension(
+        //    IReadOnlyDictionary<string, object> parameters,
+        //    out Exception error);
+
         // TODO: Add this?
         // public abstract void StopOperation();
 
@@ -1463,7 +1474,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         internal const string RemoveSecretCmd = "Remove-Secret";
         internal const string ModuleNameStr = "ModuleName";
         internal const string ModulePathStr = "ModulePath";
-        internal const string SecretParametersStr = "SecretParameters";
+        internal const string VaultParametersStr = "VaultParameters";
         internal const string ImplementingTypeStr = "ImplementingType";
         internal const string ImplementingFunctionsStr = "ImplementingFunctions";
 
@@ -1499,9 +1510,9 @@ namespace Microsoft.PowerShell.SecretsManagement
         public string ImplementingTypeName { get; }
 
         /// <summary>
-        /// Optional local store name for secret script parameters.
+        /// Optional local store name for additional vault parameters.
         /// <summary>
-        public string SecretParamsName { get; }
+        public string VaultParametersName { get; }
 
         #endregion
 
@@ -1527,8 +1538,8 @@ namespace Microsoft.PowerShell.SecretsManagement
             ImplementingTypeAssemblyName = (string) implementingType["AssemblyName"];
             ImplementingTypeName = (string) implementingType["TypeName"];
 
-            SecretParamsName = (vaultInfo.ContainsKey(SecretParametersStr)) ?
-                (string) (string) vaultInfo[SecretParametersStr] : string.Empty;
+            VaultParametersName = (vaultInfo.ContainsKey(VaultParametersStr)) ?
+                (string) (string) vaultInfo[VaultParametersStr] : string.Empty;
 
             Init();
         }
@@ -1544,7 +1555,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             ModulePath = module.ModulePath;
             ImplementingTypeAssemblyName = module.ImplementingTypeAssemblyName;
             ImplementingTypeName = module.ImplementingTypeName;
-            SecretParamsName = module.SecretParamsName;
+            VaultParametersName = module.VaultParametersName;
 
             Init();
         }
@@ -1667,7 +1678,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             // binary assembly is loaded.
             ImportPSModule(cmdlet);
 
-            var parameters = GetParamsFromStore(SecretParamsName);
+            var parameters = GetParamsFromStore(VaultParametersName);
             bool success = false;
             Exception error = null;
 
@@ -1718,7 +1729,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             // binary assembly is loaded.
             ImportPSModule(cmdlet);
 
-            var parameters = GetParamsFromStore(SecretParamsName);
+            var parameters = GetParamsFromStore(VaultParametersName);
             object secret = null;
             Exception error = null;
             
@@ -1755,7 +1766,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             // binary assembly is loaded.
             ImportPSModule(cmdlet);
 
-            var parameters = GetParamsFromStore(SecretParamsName);
+            var parameters = GetParamsFromStore(VaultParametersName);
             var success = false;
             Exception error = null;
 
@@ -1805,7 +1816,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             // binary assembly is loaded.
             ImportPSModule(cmdlet);
 
-            var parameters = GetParamsFromStore(SecretParamsName);
+            var parameters = GetParamsFromStore(VaultParametersName);
             KeyValuePair<string, string>[] results = null;
             Exception error = null;
 
@@ -2010,11 +2021,11 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         private Hashtable GetAdditionalParams()
         {
-            if (!string.IsNullOrEmpty(SecretParamsName))
+            if (!string.IsNullOrEmpty(VaultParametersName))
             {
                 int errorCode = 0;
                 if (LocalSecretStore.ReadObject(
-                    name: SecretParamsName,
+                    name: VaultParametersName,
                     outObject: out object outObject,
                     ref errorCode))
                 {
@@ -2158,10 +2169,12 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             // Create file watcher.
             _registryWatcher = new FileSystemWatcher(RegistryDirectoryPath);
-            _registryWatcher.NotifyFilter = NotifyFilters.LastWrite;
+            _registryWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName;
             _registryWatcher.Filter = "VaultInfo";
             _registryWatcher.EnableRaisingEvents = true;
             _registryWatcher.Changed += (sender, args) => { if (_allowAutoRefresh) { RefreshCache(); } };
+            _registryWatcher.Created += (sender, args) => { if (_allowAutoRefresh) { RefreshCache(); } };
+            _registryWatcher.Deleted += (sender, args) => { if (_allowAutoRefresh) { RefreshCache(); } };
 
             RefreshCache();
             _allowAutoRefresh = true;
@@ -2232,17 +2245,25 @@ namespace Microsoft.PowerShell.SecretsManagement
         {
             var vaultItems = ReadSecretVaultRegistry();
 
-            lock (_vaultInfoCache)
+            try
             {
-                _vaultInfoCache = vaultItems;
-
-                _vaultCache.Clear();
-                foreach (string vaultKey in _vaultInfoCache.Keys)
+                lock (_vaultInfoCache)
                 {
-                    _vaultCache.Add(
-                        key: vaultKey, 
-                        value: new ExtensionVaultModule(vaultKey, (Hashtable) _vaultInfoCache[vaultKey]));
+                    _vaultInfoCache = vaultItems;
+
+                    _vaultCache.Clear();
+                    foreach (string vaultKey in _vaultInfoCache.Keys)
+                    {
+                        _vaultCache.Add(
+                            key: vaultKey, 
+                            value: new ExtensionVaultModule(vaultKey, (Hashtable) _vaultInfoCache[vaultKey]));
+                    }
                 }
+            }
+            catch (Exception)
+            {
+                // If an exception is thrown while parsing the registry file, assume the file is corrupted and delete it.
+                DeleteSecretVaultRegistryFile();
             }
         }
 
@@ -2289,8 +2310,18 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             } while (++count < 4);
 
-            Dbg.Assert(false, "Unable to read vault registry file!");
             return new Hashtable();
+        }
+
+        private static void DeleteSecretVaultRegistryFile()
+        {
+            try
+            {
+                File.Delete(RegistryFilePath);
+            }
+            catch (Exception)
+            {
+            }
         }
 
         /// <summary>

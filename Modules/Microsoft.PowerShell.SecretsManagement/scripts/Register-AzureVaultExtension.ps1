@@ -9,19 +9,23 @@
 param (
     [Parameter(Mandatory=$true)]
     [ValidateNotNullOrEmpty()]
+    [string] $VaultRegistrationName,
+
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [string] $AzVaultModulePathToRegister,
+
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
     [string] $SecretManagerModulePath,
 
     [Parameter(Mandatory=$true)]
     [ValidateNotNullOrEmpty()]
-    [string] $AzVaultName,
+    [string] $AzureResourceVaultName,
 
     [Parameter(Mandatory=$true)]
     [ValidateNotNullOrEmpty()]
-    [string] $ExtensionVaultName,
-
-    [Parameter(Mandatory=$true)]
-    [ValidateNotNullOrEmpty()]
-    [string] $SubscriptionId,
+    [string] $AzureSubscriptionId,
 
     [switch] $Force
 )
@@ -58,7 +62,7 @@ CheckModuleInstallation Az.Accounts $Force
 
 # Ensure Az.KeyVault extension module is installed
 CheckModuleInstallation Az.KeyVault $Force
-$extensionVaultModulePath = ((Get-Module -Name Az.KeyVault -ListAvailable )[0] | select Path).Path
+$extensionVaultModulePath = ((Get-Module -Name Az.KeyVault -ListAvailable )[0] | Select-Object Path).Path
 
 # Import Secrets Management module
 Import-Module -Name $SecretManagerModulePath -Force
@@ -67,120 +71,15 @@ Import-Module -Name $SecretManagerModulePath -Force
 $RegisterAzSecretsVaultTemplate = @'
     Register-SecretsVault -Name {0} `
         -ModulePath '{1}' `
-        -GetSecretScript {{
-            param ([string] $Name,
-                   [string] $VaultName,
-                   [string] $SubscriptionId
-            )
-
-            Import-Module -Name Az.KeyVault -Force
-            Import-Module -Name Az.Accounts -Force
-
-            # $VerbosePreference = "Continue"
-
-            Write-Verbose "Checking for Azure subscription"
-            $azContext = Az.Accounts\Get-AzContext
-            if (! $azContext -or ($azContext.Subscription.Id -ne $SubscriptionId))
-            {{
-                Write-Warning "Log into Azure account for Subscription: $SubscriptionId"
-                Az.Accounts\Connect-AzAccount -Subscription $SubscriptionId
-            }}
-
-            if ([string]::IsNullOrEmpty($Name))
-            {{
-                $Name = "*"
-            }}
-
-            # Return all secrets that match Name pattern
-            if ([WildcardPattern]::ContainsWildcardCharacters($Name))
-            {{
-                $pattern = [WildcardPattern]::new($Name)
-                $vaultSecretInfos = Az.KeyVault\Get-AzKeyVaultSecret -VaultName $VaultName
-                foreach ($vaultSecretInfo in $vaultSecretInfos)
-                {{
-                    if ($pattern.IsMatch($vaultSecretInfo.Name))
-                    {{
-                        $secret = Az.KeyVault\Get-AzKeyVaultSecret -VaultName $VaultName -Name $vaultSecretInfo.Name
-                        Write-Output ([pscustomobject] @{{
-                            Name = $secret.Name
-                            Value = $secret.SecretValue
-                        }})
-                    }}
-                }}
-
-                return
-            }}
-
-            # Return single Name match value
-            $secret = Az.KeyVault\Get-AzKeyVaultSecret -VaultName $VaultName -Name $Name
-            if ($secret -ne $null)
-            {{
-                Write-Output ([pscustomobject] @{{
-                    Name = $secret.Name
-                    Value = $secret.SecretValue
-                    Vault = $VaultName
-                }})
-            }}
-        }} -GetSecretParameters @{{
-            VaultName = '{2}'
-            SubscriptionId = '{3}'
-        }} -SetSecretScript {{
-            param ([string] $Name,
-                   [object] $SecretToWrite,
-                   [string] $VaultName,
-                   [string] $SubscriptionId
-            )
-
-            if (! ($SecretToWrite -is [securestring]))
-            {{
-                throw "AzKeyVault only supports SecureString secret data types."
-            }}
-
-            Import-Module -Name Az.Accounts -Force
-            Import-Module -Name Az.KeyVault -Force
-
-            # $VerbosePreference = "Continue"
-
-            Write-Verbose "Checking for Azure subscription"
-            $azContext = Az.Accounts\Get-AzContext
-            if (! $azContext -or ($azContext.Subscription.Id -ne $SubscriptionId))
-            {{
-                Write-Warning "Log into Azure account for Subscription: $SubscriptionId"
-                Az.Accounts\Connect-AzAccount -Subscription $SubscriptionId
-            }}
-
-            Az.KeyVault\Set-AzKeyVaultSecret -VaultName $VaultName -Name $Name -SecretValue $SecretToWrite
-        }} -SetSecretParameters @{{
-            VaultName = '{2}'
-            SubscriptionId = '{3}'
-        }} -RemoveSecretScript {{
-            param ([string] $Name,
-                   [string] $VaultName,
-                   [string] $SubscriptionId
-            )
-
-            Import-Module -Name Az.Accounts -Force
-            Import-Module -Name Az.KeyVault -Force
-
-            # $VerbosePreference = "Continue"
-
-            Write-Verbose "Checking for Azure subscription"
-            $azContext = Az.Accounts\Get-AzContext
-            if (! $azContext -or ($azContext.Subscription.Id -ne $SubscriptionId))
-            {{
-                Write-Warning "Log into Azure account for Subscription: $SubscriptionId"
-                Az.Accounts\Connect-AzAccount -Subscription $SubscriptionId
-            }}
-
-            Az.KeyVault\Remove-AzKeyVaultSecret -VaultName $VaultName -Name $Name -Force
-        }} -RemoveSecretParameters @{{
-            VaultName = '{2}'
+        -VaultParameters @{{
+            AZKVaultName = '{2}'
             SubscriptionId = '{3}'
         }}
 '@
 
-$RegisterAzSecretsVaultScript = $RegisterAzSecretsVaultTemplate -f $ExtensionVaultName, $extensionVaultModulePath, $AzVaultName, $SubscriptionId
+$RegisterAzSecretsVaultScript = $RegisterAzSecretsVaultTemplate -f $VaultRegistrationName, $AzVaultModulePathToRegister, `
+    $AzureResourceVaultName, $AzureSubscriptionId
 
-Write-Output "Registering AZ vault: $ExtensionVaultName"
+Write-Output "Registering AZ vault: $VaultRegistrationName"
 $sb = [scriptblock]::Create($RegisterAzSecretsVaultScript)
 $sb.Invoke()
