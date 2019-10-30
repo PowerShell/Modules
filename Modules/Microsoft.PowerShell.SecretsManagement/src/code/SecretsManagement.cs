@@ -134,7 +134,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 ThrowTerminatingError(
                     new ErrorRecord(
                         new PSArgumentException(msg),
-                        "RegisterSecretsVaultInvalidName",
+                        "RegisterSecretsVaultInvalidVaultName",
                         ErrorCategory.InvalidArgument,
                         this));
             }
@@ -194,26 +194,12 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
             vaultInfo.Add(ExtensionVaultModule.ModuleNameStr, moduleInfo.Name);
 
-            // Check module required modules for implementing type of SecretsManagementExtension class.
+            // Look for implementing type of SecretsManagementExtension in loaded assemblies.
             Type implementingType = null;
-            var loadedAssemblies = System.AppDomain.CurrentDomain.GetAssemblies();
-            var extensionType = typeof(Microsoft.PowerShell.SecretsManagement.SecretsManagementExtension);
-            foreach (var assemblyName in moduleInfo.RequiredAssemblies)
+            if (moduleInfo.RequiredAssemblies.GetEnumerator().MoveNext())
             {
-                foreach (var assembly in loadedAssemblies)
-                {
-                    if (assembly.FullName.StartsWith(assemblyName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        foreach (var assemblyType in assembly.GetTypes())
-                        {
-                            if (extensionType.IsAssignableFrom(assemblyType))
-                            {
-                                implementingType = assemblyType;
-                                break;
-                            }
-                        }
-                    }
-                }
+                implementingType = GetImplementingTypeFromLoadedAssemblies(
+                    typeof(Microsoft.PowerShell.SecretsManagement.SecretsManagementExtension));
             }
 
             // Check exported functions for script implementation of required abstract methods.
@@ -259,6 +245,24 @@ namespace Microsoft.PowerShell.SecretsManagement
         #endregion
 
         #region Private methods
+
+        private static Type GetImplementingTypeFromLoadedAssemblies(Type baseType)
+        {
+            var loadedAssemblies = System.AppDomain.CurrentDomain.GetAssemblies();
+            foreach (var assembly in loadedAssemblies)
+            {
+                foreach (var assemblyType in assembly.GetTypes())
+                {
+                    if (baseType.IsAssignableFrom(assemblyType) &&
+                        (!baseType.FullName.Equals(assemblyType.FullName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return assemblyType;
+                    }
+                }
+            }
+
+            return null;
+        }
 
         private void StoreVaultParameters(
             Hashtable vaultInfo,
@@ -422,7 +426,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #region Set-VaultParameters
 
-    // TODO: Implement updating vault parameters.
+    // TODO: Implement.
 
     #endregion
 
@@ -452,24 +456,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
 
             return extensionModule;
-        }
-
-        internal void WriteDataStreams(PSDataStreams dataStreams)
-        {
-            foreach (var error in dataStreams.Error)
-            {
-                WriteError(error);
-            }
-
-            foreach (var warning in dataStreams.Warning)
-            {
-                WriteWarning(warning.Message);
-            }
-
-            foreach (var verbose in dataStreams.Verbose)
-            {
-                WriteVerbose(verbose.Message);
-            }
         }
     }
 

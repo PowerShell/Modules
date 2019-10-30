@@ -580,7 +580,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                     return nameof(NativeUtils.SCARD_W_WRONG_CHV);
                 
                 default:
-                    // TODO: Localize
                     return string.Format(CultureInfo.InvariantCulture, "Unknown error code: {0}", errorCode);
             }
         }
@@ -2144,7 +2143,6 @@ namespace Microsoft.PowerShell.SecretsManagement
                     var returnVaults = new SortedDictionary<string, ExtensionVaultModule>(StringComparer.InvariantCultureIgnoreCase);
                     foreach (var vaultName in _vaultCache.Keys)
                     {
-                        // TODO: Think about using thread local storage so that we can re-use an instance on the same thread.
                         returnVaults.Add(vaultName, _vaultCache[vaultName].Clone());
                     }
                     return returnVaults;
