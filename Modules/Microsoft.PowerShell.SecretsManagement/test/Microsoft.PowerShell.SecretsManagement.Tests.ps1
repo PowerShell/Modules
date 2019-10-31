@@ -93,10 +93,16 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         if (! (Test-Path -Path $binModulePath))
         {
             New-Item -ItemType Directory $binModulePath -Force
-            Add-Type -TypeDefinition $classImplementation `
+            $type = Add-Type -TypeDefinition $classImplementation `
                 -ReferencedAssemblies @('netstandard','Microsoft.PowerShell.SecretsManagement','System.Collections') `
-                -OutputAssembly $binModuleAssemblyPath -ErrorAction SilentlyContinue
-            "@{ ModuleVersion = '1.0'; RequiredAssemblies = @('$binModuleAssemblyPath') }" | Out-File -FilePath $script:binModuleFilePath
+                -OutputAssembly $binModuleAssemblyPath -ErrorAction SilentlyContinue -PassThru
+            
+            # We have to rename the assembly file to be the same as the randomly generated assemblyl name, otherwise
+            # PowerShell won't load it during module import.
+            $assemblyFileName = $type.Module.Assembly.ManifestModule.ScopeName
+            $newBinModuleAssemblyPath = Join-Path $binModulePath "${assemblyFileName}"
+            Copy-Item -Path $binModuleAssemblyPath -Dest $newBinModuleAssemblyPath
+            "@{ ModuleVersion = '1.0'; RequiredAssemblies = @('$assemblyFileName') }" | Out-File -FilePath $script:binModuleFilePath
         }
 
         # Script

@@ -175,13 +175,14 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             // Get module information by loading it.
-            var results = InvokeCommand.InvokeScript(
+            var results = PowerShellInvoker.InvokeScript(
                 script: @"
                     param ([string] $ModulePath)
 
                     Import-Module -Name $ModulePath -Force -PassThru
                 ",
-                args: new object[] { ModulePath });
+                args: new object[] { ModulePath },
+                out Exception _);
             PSModuleInfo moduleInfo = (results.Count == 1) ? results[0].BaseObject as PSModuleInfo : null;
             if (moduleInfo == null)
             {
@@ -194,15 +195,11 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
             vaultInfo.Add(ExtensionVaultModule.ModuleNameStr, moduleInfo.Name);
 
-            // Look for implementing type of SecretsManagementExtension in loaded assemblies.
-            Type implementingType = null;
-            if (moduleInfo.RequiredAssemblies.GetEnumerator().MoveNext())
-            {
-                implementingType = GetImplementingTypeFromLoadedAssemblies(
-                    typeof(Microsoft.PowerShell.SecretsManagement.SecretsManagementExtension));
-            }
+            // Check module required modules for implementing type of SecretsManagementExtension class.
+            Type implementingType = GetImplementingTypeFromRequiredAssemblies(moduleInfo);
 
             // Check exported functions for script implementation of required abstract methods.
+            // TODO: Also check each exported cmdlet parameter name and type.
             var hasGetSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Get-Secret");
             var hasGetSecretInfoCmd = moduleInfo.ExportedFunctions.ContainsKey("Get-SecretInfo");
             var hasSetSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Set-Secret");
@@ -246,17 +243,24 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Private methods
 
-        private static Type GetImplementingTypeFromLoadedAssemblies(Type baseType)
+        private Type GetImplementingTypeFromRequiredAssemblies(
+            PSModuleInfo moduleInfo)
         {
-            var loadedAssemblies = System.AppDomain.CurrentDomain.GetAssemblies();
-            foreach (var assembly in loadedAssemblies)
+            var extensionType = typeof(Microsoft.PowerShell.SecretsManagement.SecretsManagementExtension);
+            foreach (var requiredAssembly in moduleInfo.RequiredAssemblies)
             {
-                foreach (var assemblyType in assembly.GetTypes())
+                var assemblyName = System.IO.Path.GetFileNameWithoutExtension(requiredAssembly);
+                foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
                 {
-                    if (baseType.IsAssignableFrom(assemblyType) &&
-                        (!baseType.FullName.Equals(assemblyType.FullName, StringComparison.OrdinalIgnoreCase)))
+                    if (assembly.GetName().Name.Equals(assemblyName, StringComparison.OrdinalIgnoreCase))
                     {
-                        return assemblyType;
+                        foreach (var assemblyType in assembly.GetTypes())
+                        {
+                            if (extensionType.IsAssignableFrom(assemblyType))
+                            {
+                                return assemblyType;
+                            }
+                        }
                     }
                 }
             }
@@ -368,6 +372,22 @@ namespace Microsoft.PowerShell.SecretsManagement
                     Dbg.Assert(false, "Invalid parameter set");
                     vaultName = string.Empty;
                     break;
+            }
+
+            if (vaultName.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+            {
+                var msg = string.Format(CultureInfo.InvariantCulture, 
+                    "The {0} vault cannot be removed.", 
+                    RegisterSecretsVaultCommand.BuiltInLocalVault);
+
+                WriteError(
+                    new ErrorRecord(
+                        new PSArgumentException(msg),
+                        "RegisterSecretsVaultInvalidVaultName",
+                        ErrorCategory.InvalidArgument,
+                        this));
+
+                return;
             }
 
             var removedVaultInfo = RegisteredVaultCache.Remove(vaultName);

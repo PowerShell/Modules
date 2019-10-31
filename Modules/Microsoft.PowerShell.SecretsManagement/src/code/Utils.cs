@@ -2058,7 +2058,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                 }
             }
 
-            return null;
+            return new ReadOnlyDictionary<string, object>(
+                new Dictionary<string, object>());
         }
 
         #endregion
@@ -2241,7 +2242,10 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         private static void RefreshCache()
         {
-            var vaultItems = ReadSecretVaultRegistry();
+            if (!TryReadSecretVaultRegistry(out Hashtable vaultItems))
+            {
+                return;
+            }
 
             try
             {
@@ -2278,12 +2282,16 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <summary>
         /// Reads the current user secret vault registry information from file.
         /// </summary>
-        /// <returns>Hashtable containing registered vault information.</returns>
-        private static Hashtable ReadSecretVaultRegistry()
+        /// <param name="vaultInfo">Resulting Hashtable out parameter.</param>
+        /// <returns>True if file is successfully read and converted from json.</returns>
+        private static bool TryReadSecretVaultRegistry(
+            out Hashtable vaultInfo)
         {
+            vaultInfo = new Hashtable();
+
             if (!File.Exists(RegistryFilePath))
             {
-                return new Hashtable();
+                return false;
             }
 
             var count = 0;
@@ -2292,7 +2300,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                 try
                 {
                     string jsonInfo = File.ReadAllText(RegistryFilePath);
-                    return ConvertJsonToHashtable(jsonInfo);
+                    vaultInfo = ConvertJsonToHashtable(jsonInfo);
+                    return true;
                 }
                 catch (IOException)
                 {
@@ -2308,7 +2317,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             } while (++count < 4);
 
-            return new Hashtable();
+            return false;
         }
 
         private static void DeleteSecretVaultRegistryFile()
@@ -2399,12 +2408,16 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         private static void CheckPowerShell()
         {
+            if (_powerShell == null)
+            {
+                _powerShell = System.Management.Automation.PowerShell.Create();
+                return;
+            }
+
             if ((_powerShell.InvocationStateInfo.State != PSInvocationState.Completed && _powerShell.InvocationStateInfo.State != PSInvocationState.NotStarted)
                 || (_powerShell.Runspace.RunspaceStateInfo.State != RunspaceState.Opened))
             {
                 _powerShell.Dispose();
-                _powerShell = System.Management.Automation.PowerShell.Create();
-
                 _powerShell = System.Management.Automation.PowerShell.Create();
                 return;
             }
