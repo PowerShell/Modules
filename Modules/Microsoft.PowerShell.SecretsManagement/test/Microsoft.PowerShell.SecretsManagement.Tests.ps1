@@ -179,19 +179,86 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         Unregister-SecretsVault -Name ScriptTestVault -ErrorAction Ignore
     }
 
-    Context "Built-in local store tests" {
+    Context "Built-in local store errors" {
 
-        It "Should throw error when registering the reserved It 'BuiltInLocalVault' name" {
+        It "Should throw error when registering the reserved 'BuiltInLocalVault' vault name" {
             { Register-SecretsVault -Name BuiltInLocalVault -ModulePath 'c:\' } | Should -Throw -ErrorId 'RegisterSecretsVaultInvalidVaultName'
         }
+    }
 
+    Context "Built-in local store Byte[] type" {
+
+        $bytesToWrite = [System.Text.Encoding]::UTF8.GetBytes("Hello!!!")
+
+        It "Verifies byte[] write to local store" {
+            Add-Secret -Name __Test_ByteArray_ -Secret $bytesToWrite -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifes byte[] read from local store" {
+            $bytesRead = Get-Secret -Name __Test_ByteArray_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            [System.Text.Encoding]::UTF8.GetString($bytesRead) | Should -BeExactly "Hello!!!"
+        }
+
+        It "Verifes byte[] clobber error in local store" {
+            { Add-Secret -Name __Test_ByteArray_ -Secret $bytesToWrite -Vault BuiltInLocalVault -NoClobber } | Should -Throw -ErrorId "AddSecretAlreadyExists"
+        }
+
+        It "Verifies Remove byte[] secret" {
+            { Remove-Secret -Name __Test_ByteArray_ -Vault BuiltInLocalVault -ErrorVariable err } | Should -Not -Throw
+            $err.Count | Should -Be 0
+            { Get-Secret -Name __Test_ByteArray_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    Context "Built-in local store String type" {
+
+        It "Verifes string write to local store" {
+            Add-Secret -Name __Test_String_ -Secret "Hello!!Secret" -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies string read from local store" {
+            $strRead = Get-Secret -Name __Test_String_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            $strRead | Should -BeExactly "Hello!!Secret"
+        }
+
+        It "Verifies string remove from local store" {
+            { Remove-Secret -Name __Test_String_ -Vault BuiltInLocalVault -ErrorVariable err } | Should -Not -Throw
+            $err.Count | Should -Be 0
+            { Get-Secret -Name __Test_String_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    Context "Built-in local store SecureString type" {
+
+        $secureStringToWrite = ConvertTo-SecureString -String "SSHello!!!" -AsPlainText -Force
+
+        It "Verifies SecureString write to local store" {
+            Add-Secret -Name __Test_SecureString_ -Secret $secureStringToWrite -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies SecureString read from local store" {
+            $ssRead = Get-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            [System.Net.NetworkCredential]::new('',$ssRead).Password | Should -BeExactly 'SSHello!!!'
+        }
+
+        It "Verifies SecureString remove from local store" {
+            { Remove-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorVariable err } | Should -Not -Throw
+            $err.Count | Should -Be 0
+            { Get-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
     }
 
     Context "Binary extension vault tests" {
 
         It "Should register the binary test vault extension successfully" {
             { Register-SecretsVault -Name BinaryTestVault -ModulePath $script:binModuleFilePath -VaultParameters @{ Param1 = "Hello" } -ErrorVariable err } | Should -Not -Throw
-            $err | Should -Be $null
+            $err.Count | Should -Be 0
         }
 
         It "Should throw error when registering existing registered vault extension" {
@@ -207,7 +274,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         It "Should register the script test vault extension successfully" {
             { Register-SecretsVault -Name ScriptTestVault -ModulePath $script:scriptModuleFilePath -VaultParameters @{ Param1 = "Hello" } -ErrorVariable err } | Should -Not -Throw
-            $err | Should -Be $null
+            $err.Count | Should -Be 0
         }
 
         It "Should throw error when registering existing registered vault extension" {
