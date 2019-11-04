@@ -93,6 +93,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         internal const string ScriptParamTag = "_SPT_Parameters_";
         internal const string BuiltInLocalVault = "BuiltInLocalVault";
+        internal const string ImplementingModule = "ImplementingModule";
 
         #endregion
 
@@ -104,14 +105,14 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </summary>
         [Parameter(Position=0, Mandatory=true)]
         [ValidateNotNullOrEmpty]
-        public string Name { get; set; }
+        public string VaultName { get; set; }
 
         /// <summary>
-        /// Gets or sets the path of the vault extension module to register.
+        /// Gets or sets the module name or file path of the vault extension module to register.
         /// </summary>
         [Parameter(Position=1, Mandatory=true)]
         [ValidateNotNullOrEmpty]
-        public string ModulePath { get; set; }
+        public string ModuleName { get; set; }
 
         /// <summary>
         /// Gets or sets an optional Hashtable of parameters by name/value pairs.
@@ -127,7 +128,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         protected override void BeginProcessing()
         {
-            if (Name.Equals(BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+            if (VaultName.Equals(BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 var msg = string.Format(CultureInfo.InvariantCulture, 
                     "The name {0} is reserved and cannot be used for a vault extension.", BuiltInLocalVault);
@@ -146,7 +147,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             // Validate mandatory parameters.
             var vaultItems = RegisteredVaultCache.GetAll();
-            if (vaultItems.ContainsKey(Name))
+            if (vaultItems.ContainsKey(VaultName))
             {
                 ThrowTerminatingError(
                     new ErrorRecord(
@@ -156,65 +157,53 @@ namespace Microsoft.PowerShell.SecretsManagement
                         this));
             }
 
-            var filePaths = this.GetResolvedProviderPathFromPSPath(ModulePath, out ProviderInfo _);
-            if (filePaths.Count == 0)
-            {
-                ThrowTerminatingError(
-                    new ErrorRecord(
-                        new PSArgumentException("Provided ModulePath is not valid."),
-                        "RegisterSecretsVaultInvalidModulePath",
-                        ErrorCategory.InvalidArgument,
-                        this));
-            }
-            ModulePath = filePaths[0];
-            vaultInfo.Add(ExtensionVaultModule.ModulePathStr, ModulePath);
-
-            if (!ShouldProcess(Name, VerbsLifecycle.Register))
+            if (!ShouldProcess(VaultName, VerbsLifecycle.Register))
             {
                 return;
             }
 
-            // Get module information by loading it.
-            var results = PowerShellInvoker.InvokeScript(
-                script: @"
-                    param ([string] $ModulePath)
-
-                    Import-Module -Name $ModulePath -Force -PassThru
-                ",
-                args: new object[] { ModulePath },
-                out Exception _);
-            PSModuleInfo moduleInfo = (results.Count == 1) ? results[0].BaseObject as PSModuleInfo : null;
+            var moduleInfo = GetModuleInfo(ModuleName);
             if (moduleInfo == null)
             {
+                var msg = string.Format(CultureInfo.InvariantCulture, 
+                    "Could not load and retrieve module information for module: {0}.",
+                    ModuleName);
+
                 ThrowTerminatingError(
                     new ErrorRecord(
-                        new PSInvalidOperationException("Could not load and retrieve module information."),
+                        new PSInvalidOperationException(),
                         "RegisterSecretsVaultCantGetModuleInfo",
                         ErrorCategory.InvalidOperation,
                         this));
             }
-            vaultInfo.Add(ExtensionVaultModule.ModuleNameStr, moduleInfo.Name);
+
+            var modulePath = moduleInfo.Path;
+            var dirPath = System.IO.File.Exists(modulePath) ? System.IO.Path.GetDirectoryName(modulePath) : modulePath;
 
             // Check module required modules for implementing type of SecretsManagementExtension class.
             Type implementingType = GetImplementingTypeFromRequiredAssemblies(moduleInfo);
 
-            // Check exported functions for script implementation of required abstract methods.
-            // TODO: Also check each exported cmdlet parameter name and type.
-            var hasGetSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Get-Secret");
-            var hasGetSecretInfoCmd = moduleInfo.ExportedFunctions.ContainsKey("Get-SecretInfo");
-            var hasSetSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Set-Secret");
-            var hasRemoveSecretCmd = moduleInfo.ExportedFunctions.ContainsKey("Remove-Secret");
-            var haveScriptFunctionImplementation = hasGetSecretCmd && hasGetSecretInfoCmd && hasSetSecretCmd && hasRemoveSecretCmd;
+            // Check if module supports implementing functions.
+            var haveScriptFunctionImplementation = CheckForImplementingModule(
+                dirPath: dirPath,
+                error: out Exception error);
 
             if (implementingType == null && !haveScriptFunctionImplementation)
             {
+                var invalidException = new PSInvalidOperationException(
+                    message: "Could not find a SecretsManagementExtension implementing type, or a valid implementing script module.",
+                    innerException: error);
+
                 ThrowTerminatingError(
                     new ErrorRecord(
-                        new PSInvalidOperationException("Could not find an implementing type of SecretsManagementExtension, or the alternate four required script functions (Get-Secret, Get-SecretInfo, Set-Secret, Remove-Secret)."),
-                        "RegisterSecretsVaultCantFindImplementingTypeOrScriptFunctions",
+                        invalidException,
+                        "RegisterSecretsVaultCantFindImplementingTypeOrScriptModule",
                         ErrorCategory.ObjectNotFound,
                         this));
             }
+
+            vaultInfo.Add(ExtensionVaultModule.ModulePathStr, dirPath);
+            vaultInfo.Add(ExtensionVaultModule.ModuleNameStr, moduleInfo.Name);
 
             vaultInfo.Add(
                 key: ExtensionVaultModule.ImplementingTypeStr, 
@@ -230,12 +219,12 @@ namespace Microsoft.PowerShell.SecretsManagement
             // Store the optional secret parameters
             StoreVaultParameters(
                 vaultInfo: vaultInfo,
-                vaultName: Name,
+                vaultName: VaultName,
                 parameters: VaultParameters);
 
             // Register new secret vault information.
             RegisteredVaultCache.Add(
-                keyName: Name,
+                keyName: VaultName,
                 vaultInfo: vaultInfo);
         }
 
@@ -243,7 +232,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Private methods
 
-        private Type GetImplementingTypeFromRequiredAssemblies(
+        private static Type GetImplementingTypeFromRequiredAssemblies(
             PSModuleInfo moduleInfo)
         {
             var extensionType = typeof(Microsoft.PowerShell.SecretsManagement.SecretsManagementExtension);
@@ -266,6 +255,117 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
 
             return null;
+        }
+
+        private static bool CheckForImplementingModule(
+            string dirPath,
+            out Exception error)
+        {
+            // An implementing module will be in a subfolder with module name 'ImplementingModule',
+            // and will export the four required functions: Add-Secret, Get-Secret, Remove-Secret, Get-SecretInfo.
+            var implementingModulePath = System.IO.Path.Combine(dirPath, ImplementingModule);
+            var moduleInfo = GetModuleInfo(implementingModulePath);
+            if (moduleInfo == null)
+            {
+                error = new ItemNotFoundException("Implementing script module not found.");
+                return false;
+            }
+
+            // Get-Secret function
+            if (!moduleInfo.ExportedFunctions.ContainsKey("Get-Secret"))
+            {
+                error = new ItemNotFoundException("Get-Secret function not found.");
+                return false;
+            }
+            var funcInfo = moduleInfo.ExportedFunctions["Get-Secret"];
+            if (!funcInfo.Parameters.ContainsKey("Name"))
+            {
+                error = new ItemNotFoundException("Get-Secret Name parameter not found.");
+                return false;
+            }
+            if (!funcInfo.Parameters.ContainsKey("AdditionalParameters"))
+            {
+                error = new ItemNotFoundException("Get-Secret AdditionalParameters parameter not found.");
+                return false;
+            }
+
+            // Set-Secret function
+            if (!moduleInfo.ExportedFunctions.ContainsKey("Set-Secret"))
+            {
+                error = new ItemNotFoundException("Set-Secret function not found.");
+                return false;
+            }
+            funcInfo = moduleInfo.ExportedFunctions["Set-Secret"];
+            if (!funcInfo.Parameters.ContainsKey("Name"))
+            {
+                error = new ItemNotFoundException("Set-Secret Name parameter not found.");
+                return false;
+            }
+            if (!funcInfo.Parameters.ContainsKey("Secret"))
+            {
+                error = new ItemNotFoundException("Set-Secret Secret parameter not found.");
+                return false;
+            }
+            if (!funcInfo.Parameters.ContainsKey("AdditionalParameters"))
+            {
+                error = new ItemNotFoundException("Set-Secret AdditionalParameters parameter not found.");
+                return false;
+            }
+
+            // Remove-Secret function
+            if (!moduleInfo.ExportedFunctions.ContainsKey("Remove-Secret"))
+            {
+                error = new ItemNotFoundException("Remove-Secret function not found.");
+                return false;
+            }
+            funcInfo = moduleInfo.ExportedFunctions["Remove-Secret"];
+            if (!funcInfo.Parameters.ContainsKey("Name"))
+            {
+                error = new ItemNotFoundException("Remove-Secret Name parameter not found.");
+                return false;
+            }
+            if (!funcInfo.Parameters.ContainsKey("AdditionalParameters"))
+            {
+                error = new ItemNotFoundException("Remove-Secret AdditionalParameters parameter not found.");
+                return false;
+            }
+
+            // Get-SecretInfo function
+            if (!moduleInfo.ExportedFunctions.ContainsKey("Get-SecretInfo"))
+            {
+                error = new ItemNotFoundException("Get-SecretInfo function not found.");
+                return false;
+            }
+            funcInfo = moduleInfo.ExportedFunctions["Get-SecretInfo"];
+            if (!funcInfo.Parameters.ContainsKey("Filter"))
+            {
+                error = new ItemNotFoundException("Get-SecretInfo Filter parameter not found.");
+                return false;
+            }
+            if (!funcInfo.Parameters.ContainsKey("AdditionalParameters"))
+            {
+                error = new ItemNotFoundException("Get-SecretInfo AdditionalParameters parameter not found.");
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
+        private static PSModuleInfo GetModuleInfo(
+            string modulePath)
+        {
+            // Get module information by loading it.
+            var results = PowerShellInvoker.InvokeScript(
+                script: @"
+                    param ([string] $ModulePath)
+
+                    Import-Module -Name $ModulePath -Force -PassThru
+                ",
+                args: new object[] { modulePath },
+                out Exception _);
+            
+            return (results.Count == 1) ? results[0].BaseObject as PSModuleInfo : null;
         }
 
         private void StoreVaultParameters(

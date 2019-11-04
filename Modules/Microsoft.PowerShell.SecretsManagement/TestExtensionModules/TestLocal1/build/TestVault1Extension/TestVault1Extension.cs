@@ -146,11 +146,6 @@ namespace TestVault1Extension
     {
         #region Members
 
-        // Ensure there is one instance of PowerShell per thread by using [ThreadStatic]
-        // attribute to store each local thread instance.
-        [ThreadStatic]
-        private static System.Management.Automation.PowerShell _powerShell;
-
         private const string FunctionsDefScript = @"
             function Get-Path
             {
@@ -248,62 +243,22 @@ namespace TestVault1Extension
 
         #endregion
 
-        #region Constructor
-
-        static PowerShellInvoker()
-        {
-            InitPowerShell();
-        }
-
-        private static void InitPowerShell()
-        {
-            _powerShell = System.Management.Automation.PowerShell.Create();
-            _powerShell.AddScript(FunctionsDefScript).Invoke();
-        }
-
-        #endregion
-
         #region Methods
-
-        private static void CheckPowerShell()
-        {
-            if ((_powerShell.InvocationStateInfo.State != PSInvocationState.Completed && _powerShell.InvocationStateInfo.State != PSInvocationState.NotStarted)
-                || (_powerShell.Runspace.RunspaceStateInfo.State != RunspaceState.Opened))
-            {
-                _powerShell.Dispose();
-                _powerShell = System.Management.Automation.PowerShell.Create();
-
-                InitPowerShell();
-                return;
-            }
-
-            _powerShell.Commands.Clear();
-            _powerShell.Streams.ClearStreams();
-            _powerShell.Runspace.ResetRunspaceState();
-        }
-
-        public static Collection<PSObject> InvokeScript(
-            string script,
-            object[] args,
-            out PSDataStreams dataStreams)
-        {
-            CheckPowerShell();
-
-            var results = _powerShell.AddScript(script).AddParameters(args).Invoke();
-            dataStreams = _powerShell.Streams;
-            return results;
-        }
 
         public static Collection<PSObject> InvokeCommand(
             string command,
             object[] args,
             out PSDataStreams dataStreams)
         {
-            CheckPowerShell();
+            using (var powerShell = System.Management.Automation.PowerShell.Create())
+            {
+                powerShell.AddScript(FunctionsDefScript).Invoke();
+                powerShell.Commands.Clear();
 
-            var results = _powerShell.AddCommand(command).AddParameters(args).Invoke();
-            dataStreams = _powerShell.Streams;
-            return results;
+                var results = powerShell.AddCommand(command).AddParameters(args).Invoke();
+                dataStreams = powerShell.Streams;
+                return results;
+            }
         }
     }
 

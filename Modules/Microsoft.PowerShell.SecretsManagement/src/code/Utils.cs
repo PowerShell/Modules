@@ -1882,9 +1882,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript(
                 script: RunCommandScript,
-                args: new object[] { ModulePath, ModuleName, SetSecretCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, SetSecretCmd, parameters },
                 error: out Exception error);
 
             bool success = results.Count > 0 ? (bool) results[0].BaseObject : false;
@@ -1915,9 +1916,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript(
                 script: RunCommandScript,
-                args: new object[] { ModulePath, ModuleName, GetSecretCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, GetSecretCmd, parameters },
                 error: out Exception error);
             
             if (error != null)
@@ -1943,9 +1945,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript(
                 script: RunCommandScript,
-                args: new object[] { ModulePath, ModuleName, RemoveSecretCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, RemoveSecretCmd, parameters },
                 error: out Exception error);
 
             bool success = results.Count > 0 ? (bool) results[0].BaseObject : false;
@@ -1976,9 +1979,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript(
                 script: RunCommandScript,
-                args: new object[] { ModulePath, ModuleName, GetSecretInfoCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, GetSecretInfoCmd, parameters },
                 error: out Exception error);
             
             if (error != null)
@@ -2117,7 +2121,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         ";
 
         private static readonly string RegistryDirectoryPath =  Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + 
-            @"\Microsoft\Windows\PowerShell\SecretVaultRegistry";
+            @"\Microsoft\PowerShell\SecretVaultRegistry";
 
         private static readonly string RegistryFilePath = RegistryDirectoryPath + @"\VaultInfo";
 
@@ -2386,75 +2390,37 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     internal static class PowerShellInvoker
     {
-        #region Members
-
-        // Ensure there is one instance of PowerShell per thread by using [ThreadStatic]
-        // attribute to store each local thread instance.
-        [ThreadStatic]
-        private static System.Management.Automation.PowerShell _powerShell;
-
-        #endregion
-
-        #region Constructor
-
-        static PowerShellInvoker()
-        {
-            _powerShell = System.Management.Automation.PowerShell.Create();
-        }
-
-        #endregion
-
         #region Methods
-
-        private static void CheckPowerShell()
-        {
-            if (_powerShell == null)
-            {
-                _powerShell = System.Management.Automation.PowerShell.Create();
-                return;
-            }
-
-            if ((_powerShell.InvocationStateInfo.State != PSInvocationState.Completed && _powerShell.InvocationStateInfo.State != PSInvocationState.NotStarted)
-                || (_powerShell.Runspace.RunspaceStateInfo.State != RunspaceState.Opened))
-            {
-                _powerShell.Dispose();
-                _powerShell = System.Management.Automation.PowerShell.Create();
-                return;
-            }
-
-            _powerShell.Commands.Clear();
-            _powerShell.Streams.ClearStreams();
-            _powerShell.Runspace.ResetRunspaceState();
-        }
 
         public static Collection<PSObject> InvokeScript(
             string script,
             object[] args,
             out Exception error)
         {
-            CheckPowerShell();
-
-            error = null;
-            Collection<PSObject> results;
-            try
+            using (var powerShell = System.Management.Automation.PowerShell.Create())
             {
-                results = _powerShell.AddScript(script).AddParameters(args).Invoke();
-                if (_powerShell.Streams.Error.Count > 0)
+                error = null;
+                Collection<PSObject> results;
+                try
                 {
-                    error = _powerShell.Streams.Error[0].Exception;
+                    results = powerShell.AddScript(script).AddParameters(args).Invoke();
+                    if (powerShell.Streams.Error.Count > 0)
+                    {
+                        error = powerShell.Streams.Error[0].Exception;
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                error = ex;
-                results = new Collection<PSObject>();
-            }
+                catch (Exception ex)
+                {
+                    error = ex;
+                    results = new Collection<PSObject>();
+                }
 
-            return results;
+                return results;
+            }
         }
+
+        #endregion
     }
 
     #endregion
 }
-
-    #endregion
