@@ -277,7 +277,7 @@ namespace AKVaultExtension
 
                 return results;
             }
-       }
+        }
 
         #endregion
     }

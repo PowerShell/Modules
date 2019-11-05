@@ -70,10 +70,10 @@ namespace Microsoft.PowerShell.SecretsManagement
             string defaultVaultName)
         {
             Name = defaultVaultName;
-            ModuleName = "None";
-            ModulePath = "None";
-            ImplementingTypeAssemblyName = "None";
-            ImplementingTypeName = "None";
+            ModuleName = string.Empty;
+            ModulePath = string.Empty;
+            ImplementingTypeAssemblyName = string.Empty;
+            ImplementingTypeName = string.Empty;
         }
 
         #endregion
@@ -105,7 +105,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </summary>
         [Parameter(Position=0, Mandatory=true)]
         [ValidateNotNullOrEmpty]
-        public string VaultName { get; set; }
+        public string Name { get; set; }
 
         /// <summary>
         /// Gets or sets the module name or file path of the vault extension module to register.
@@ -128,7 +128,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         protected override void BeginProcessing()
         {
-            if (VaultName.Equals(BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+            if (Name.Equals(BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 var msg = string.Format(CultureInfo.InvariantCulture, 
                     "The name {0} is reserved and cannot be used for a vault extension.", BuiltInLocalVault);
@@ -147,7 +147,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             // Validate mandatory parameters.
             var vaultItems = RegisteredVaultCache.GetAll();
-            if (vaultItems.ContainsKey(VaultName))
+            if (vaultItems.ContainsKey(Name))
             {
                 ThrowTerminatingError(
                     new ErrorRecord(
@@ -157,7 +157,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         this));
             }
 
-            if (!ShouldProcess(VaultName, VerbsLifecycle.Register))
+            if (!ShouldProcess(Name, VerbsLifecycle.Register))
             {
                 return;
             }
@@ -219,12 +219,12 @@ namespace Microsoft.PowerShell.SecretsManagement
             // Store the optional secret parameters
             StoreVaultParameters(
                 vaultInfo: vaultInfo,
-                vaultName: VaultName,
+                vaultName: Name,
                 parameters: VaultParameters);
 
             // Register new secret vault information.
             RegisteredVaultCache.Add(
-                keyName: VaultName,
+                keyName: Name,
                 vaultInfo: vaultInfo);
         }
 
@@ -685,7 +685,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                 var extensionModule = GetExtensionVault(Vault);
                 WriteResults(
-                    Vault,
+                    extensionModule.VaultName,
                     extensionModule.InvokeGetSecretInfo(
                         filter: Name,
                         cmdlet: this));
@@ -761,9 +761,9 @@ namespace Microsoft.PowerShell.SecretsManagement
             psObject.Members.Add(
                 new PSNoteProperty("Name", name));
             psObject.Members.Add(
-                new PSNoteProperty("TypeName", typeName));
-            psObject.Members.Add(
                 new PSNoteProperty("Vault", vaultName));
+            psObject.Members.Add(
+                new PSNoteProperty("TypeName", typeName));
 
             WriteObject(psObject);
         }
