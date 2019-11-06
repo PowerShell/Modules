@@ -1927,7 +1927,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 cmdlet.WriteError(
                     new ErrorRecord(
                         error,
-                        "errorId",
+                        "InvokeGetSecretError",
                         ErrorCategory.InvalidOperation,
                         this));
             }

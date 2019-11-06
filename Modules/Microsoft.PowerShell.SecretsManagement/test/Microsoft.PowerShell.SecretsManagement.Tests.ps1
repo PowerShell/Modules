@@ -128,14 +128,13 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         if (! (Test-Path -Path $binModulePath))
         {
             New-Item -ItemType Directory $binModulePath -Force
-            $type = Add-Type -TypeDefinition $classImplementation `
+            $types = Add-Type -TypeDefinition $classImplementation `
                 -ReferencedAssemblies @('netstandard','Microsoft.PowerShell.SecretsManagement','System.Collections','System.Management.Automation','System.Runtime.Extensions') `
                 -OutputAssembly $binModuleAssemblyPath -ErrorAction SilentlyContinue -PassThru
             
             # We have to rename the assembly file to be the same as the randomly generated assemblyl name, otherwise
             # PowerShell won't load it during module import.
-            $assemblyFileName = $type.Module.Assembly.ManifestModule.ScopeName
-            if ($assemblyFileName.Count -gt 1) { $assemblyFileName = $assemblyFileName[0] }
+            $assemblyFileName = $types[0].Module.Assembly.ManifestModule.ScopeName
             $newBinModuleAssemblyPath = Join-Path $binModulePath "${assemblyFileName}"
             Copy-Item -Path $binModuleAssemblyPath -Dest $newBinModuleAssemblyPath
             "@{ ModuleVersion = '1.0'; RequiredAssemblies = @('$assemblyFileName') }" | Out-File -FilePath $script:binModuleFilePath
@@ -143,7 +142,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         # Script
         $scriptImplementation = @'
-            $script:store = @{}
+            $script:store = [VaultExtension.Store]::Dict
 
             function Get-Secret
             {
@@ -158,6 +157,11 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                     Write-Error("CannotFindSecret")
                 }
 
+                if ($secret -is [byte[]])
+                {
+                    return @(,$secret)
+                }
+
                 return $secret
             }
 
@@ -169,8 +173,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                     [hashtable] $AdditionalParameters
                 )
 
-                $script:store.Add($Name, $Secret)
-                return $?
+                return $script:store.TryAdd($Name, $Secret)
             }
 
             function Remove-Secret
@@ -180,8 +183,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                     [hashtable] $AdditionalParameters
                 )
 
-                $script:store.Remove($Name)
-                return $?
+                return $script:store.Remove($Name)
             }
 
             function Get-SecretInfo
@@ -191,12 +193,28 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                     [hashtable] $AdditionalParameters
                 )
 
-                foreach ($key in $global:store.Keys)
+                if ([string]::IsNullOrEmpty($Filter))
                 {
-                    Write-Output ([pscustomobject] @{
-                        Name = $key
-                        Value = ($global:store[$key]).GetType().FullName
-                    })
+                    $Filter = '*'
+                }
+                $pattern = [WildcardPattern]::new($Filter)
+                foreach ($key in $script:store.Keys)
+                {
+                    if ($pattern.IsMatch($key))
+                    {
+                        $secret = $script:store[$key]
+                        $typeName = if ($secret -is [byte[]]) { "ByteArray" }
+                        elseif ($secret -is [string]) { "String" }
+                        elseif ($secret -is [securestring]) { "SecureString" }
+                        elseif ($secret -is [PSCredential]) { "PSCredential" }
+                        elseif ($secret -is [hashtable]) { "Hashtable" }
+                        else { "Unknown" }
+
+                        Write-Output ([pscustomobject] @{
+                            Name = $key
+                            Value = $typeName
+                        })
+                    }
                 }
             }
 '@
@@ -254,6 +272,14 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             { Add-Secret -Name __Test_ByteArray_ -Secret $bytesToWrite -Vault BuiltInLocalVault -NoClobber } | Should -Throw -ErrorId "AddSecretAlreadyExists"
         }
 
+        It "Verifies byte[] enumeration from local store" {
+            $blobInfo = Get-SecretInfo -Name __Test_ByteArray_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            $blobInfo.Name | Should -BeExactly "__Test_ByteArray_"
+            $blobInfo.TypeName | Should -BeExactly "ByteArray"
+            $blobInfo.Vault | Should -BeExactly "BuiltInLocalVault"
+        }
+
         It "Verifies Remove byte[] secret" {
             { Remove-Secret -Name __Test_ByteArray_ -Vault BuiltInLocalVault -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
@@ -272,6 +298,14 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $strRead = Get-Secret -Name __Test_String_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
             $strRead | Should -BeExactly "Hello!!Secret"
+        }
+
+        It "Verifies string enumeration from local store" {
+            $strInfo = Get-SecretInfo -Name __Test_String_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            $strInfo.Name | Should -BeExactly "__Test_String_"
+            $strInfo.TypeName | Should -BeExactly "String"
+            $strInfo.Vault | Should -BeExactly "BuiltInLocalVault"
         }
 
         It "Verifies string remove from local store" {
@@ -296,10 +330,272 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             [System.Net.NetworkCredential]::new('',$ssRead).Password | Should -BeExactly 'SSHello!!!'
         }
 
+        It "Verifies SecureString enumeration from local store" {
+            $ssInfo = Get-SecretInfo -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            $ssInfo.Name | Should -BeExactly "__Test_SecureString_"
+            $ssInfo.TypeName | Should -BeExactly "SecureString"
+            $ssInfo.Vault | Should -BeExactly "BuiltInLocalVault"
+        }
+
         It "Verifies SecureString remove from local store" {
             { Remove-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
-            { Get-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+            { Get-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    Context "Built-in local store PSCredential type" {
+
+        It "Verifies PSCredential type write to local store" {
+            $cred = [pscredential]::new('UserL', (ConvertTo-SecureString "UserLSecret" -AsPlainText -Force))
+            Add-Secret -Name __Test_PSCredential_ -Secret $cred -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies PSCredential read from local store" {
+            $cred = Get-Secret -Name __Test_PSCredential_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            $cred.UserName | Should -BeExactly "UserL"
+            [System.Net.NetworkCredential]::new('', ($cred.Password)).Password | Should -BeExactly "UserLSecret"
+        }
+
+        It "Verifies PSCredential enumeration from local store" {
+            $credInfo = Get-SecretInfo -Name __Test_PSCredential_ -Vault BuiltInLocalVault -ErrorVariable err
+            $credInfo.Name | Should -BeExactly "__Test_PSCredential_"
+            $credInfo.TypeName | Should -BeExactly "PSCredential"
+            $credInfo.Vault | Should -BeExactly "BuiltInLocalVault"
+        }
+
+        It "Verifies PSCredential remove from local store" {
+            Remove-Secret -Name __Test_PSCredential_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            { Get-Secret -Name __Test_PSCredential_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    Context "Built-in local store Hashtable type" {
+
+        It "Verifies Hashtable type write to local store" {
+            $ht = @{
+                Blob = ([byte[]] @(1,2))
+                Str = "Hello"
+                SecureString = (ConvertTo-SecureString "SecureHello" -AsPlainText -Force)
+                Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString "UserASecret" -AsPlainText -Force)))
+            }
+            Add-Secret -Name __Test_Hashtable_ -Secret $ht -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies Hashtable read from local store" {
+            $ht = Get-Secret -Name __Test_Hashtable_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            $ht.Blob.Count | Should -Be 2
+            $ht.Str | Should -BeExactly "Hello"
+            [System.Net.NetworkCredential]::new('', ($ht.SecureString)).Password | Should -BeExactly "SecureHello"
+            $ht.Cred.UserName | Should -BeExactly "UserA"
+            [System.Net.NetworkCredential]::New('', ($ht.Cred.Password)).Password | Should -BeExactly "UserASecret"
+        }
+
+        It "Verifies Hashtable enumeration from local store" {
+            $htInfo = Get-SecretInfo -Name __Test_Hashtable_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            $htInfo.Name | Should -BeExactly "__Test_Hashtable_"
+            $htInfo.TypeName | Should -BeExactly "Hashtable"
+            $htInfo.Vault | Should -BeExactly "BuiltInLocalVault"
+        }
+
+        It "Verifies Hashtable remove from local store" {
+            Remove-Secret -Name __Test_Hashtable_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            { Get-Secret -Name __Test_Hashtable_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    function VerifyByteArrayType
+    {
+        param (
+            [string] $Title,
+            [string] $VaultName
+        )
+
+        It "Verifies writing byte[] type to $Title vault" {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes("BinVaultHelloStr")
+            Add-Secret -Name BinVaultBlob -Secret $bytes -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies reading byte[] type from $Title vault" {
+            $blob = Get-Secret -Name BinVaultBlob -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            [System.Text.Encoding]::UTF8.GetString($blob) | Should -BeExactly "BinVaultHelloStr"
+        }
+
+        It "Verifies enumerating byte[] type from $Title vault" {
+            $blobInfo = Get-SecretInfo -Name BinVaultBlob -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $blobInfo.Name | Should -BeExactly "BinVaultBlob"
+            $blobInfo.TypeName | Should -BeExactly "ByteArray"
+            $blobInfo.Vault | Should -BeExactly $VaultName
+        }
+
+        It "Verifies removing byte[] type from $Title vault" {
+            Remove-Secret -Name BinVaultBlob -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            { Get-Secret -Name BinVaultBlob -Vault $VaultName -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    function VerifyStringType
+    {
+        param (
+            [string] $Title,
+            [string] $VaultName
+        )
+
+        It "Verifies writing string type to $Title vault" {
+            Add-Secret -Name BinVaultStr -Secret "HelloBinVault" -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies reading string type from $Title vault" {
+            $str = Get-Secret -Name BinVaultStr -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $str | Should -BeExactly "HelloBinVault"
+        }
+
+        It "Verifies enumerating string type from $Title vault" {
+            $strInfo = Get-SecretInfo -Name BinVaultStr -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $strInfo.Name | Should -BeExactly "BinVaultStr"
+            $strInfo.TypeName | Should -BeExactly "String"
+            $strInfo.Vault | Should -BeExactly $VaultName
+        }
+
+        It "Verifies removing string type from $Title vault" {
+            Remove-Secret -Name BinVaultStr -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            { Get-Secret -Name BinVaultStr -Vault $VaultName -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    function VerifySecureStringType
+    {
+        param (
+            [string] $Title,
+            [string] $VaultName
+        )
+
+        It "Verifies writing SecureString type to $Title vault" {
+            Add-Secret -Name BinVaultSecureStr -Secret (ConvertTo-SecureString "BinVaultSecureStr" -AsPlainText -Force) `
+                -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies reading SecureString type from $Title vault" {
+            $ss = Get-Secret -Name BinVaultSecureStr -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            [System.Net.NetworkCredential]::new('',$ss).Password | Should -BeExactly "BinVaultSecureStr"
+        }
+
+        It "Verifies enumerating SecureString type from $Title vault" {
+            $ssInfo = Get-SecretInfo -Name BinVaultSecureStr -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $ssInfo.Name | Should -BeExactly "BinVaultSecureStr"
+            $ssInfo.TypeName | Should -BeExactly "SecureString"
+            $ssInfo.Vault | Should -BeExactly $VaultName
+        }
+
+        It "Verifies removing SecureString type from $Title vault" {
+            Remove-Secret -Name BinVaultSecureStr -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            { Get-Secret -Name BinVaultSecureStr -Vault $VaultName -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    function VerifyPSCredentialType
+    {
+        param (
+            [string] $Title,
+            [string] $VaultName
+        )
+
+        It "Verifies writing PSCredential to $Title vault" {
+            $cred = [pscredential]::new('UserName', (ConvertTo-SecureString "UserSecret" -AsPlainText -Force))
+            Add-Secret -Name BinVaultCred -Secret $cred -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies reading PSCredential type from $Title vault" {
+            $cred = Get-Secret -Name BinVaultCred -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $cred.UserName | Should -BeExactly "UserName"
+            [System.Net.NetworkCredential]::new('', ($cred.Password)).Password | Should -BeExactly "UserSecret"
+        }
+
+        It "Verifies enumerating PSCredential type from $Title vault" {
+            $credInfo = Get-SecretInfo -Name BinVaultCred -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $credInfo.Name | Should -BeExactly "BinVaultCred"
+            $credInfo.TypeName | Should -BeExactly "PSCredential"
+            $credInfo.Vault | Should -BeExactly $VaultName
+        }
+
+        It "Verifies removing PSCredential type from $Title vault" {
+            Remove-Secret -Name BinVaultCred -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            { Get-Secret -Name BinVaultCred -Vault $VaultName -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
+        }
+    }
+
+    function VerifyHashType
+    {
+        param (
+            [string] $Title,
+            [string] $VaultName
+        )
+
+        It "Verifies writing Hashtable type to $Title vault" {
+            $ht = @{ 
+                Blob = ([byte[]] @(1,2))
+                Str = "Hello"
+                SecureString = (ConvertTo-SecureString "SecureHello" -AsPlainText -Force)
+                Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString "UserASecret" -AsPlainText -Force)))
+            }
+            Add-Secret -Name BinVaultHT -Vault $VaultName -Secret $ht -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies reading Hashtable type from $Title vault" {
+            $ht = Get-Secret -Name BinVaultHT -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $ht.Blob.Count | Should -Be 2
+            $ht.Str | Should -BeExactly "Hello"
+            [System.Net.NetworkCredential]::new('', $ht.SecureString).Password | Should -BeExactly "SecureHello"
+            $ht.Cred.UserName | Should -BeExactly "UserA"
+            [System.Net.NetworkCredential]::new('', $ht.Cred.Password).Password | Should -BeExactly "UserASecret"
+        }
+
+        It "Verifies enumerating Hashtable type from $Title vault" {
+            $htInfo = Get-SecretInfo -Name BinVaultHT -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            $htInfo.Name | Should -BeExactly "BinVaultHT"
+            $htInfo.TypeName | Should -BeExactly "Hashtable"
+            $htInfo.Vault | Should -BeExactly $VaultName
+        }
+
+        It "Verifies removing Hashtable type from $Title vault" {
+            Remove-Secret -Name BinVaultHT -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            { Get-Secret -Name BinVaultHT -Vault $VaultName -ErrorAction Stop } | Should -Throw `
+                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
         }
     }
 
@@ -320,156 +616,35 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         [VaultExtension.Store]::Dict.Clear()
 
-        It "Verifies writing byte[] type to binary vault" {
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes("BinVaultHelloStr")
-            Add-Secret -Name BinVaultBlob -Secret $bytes -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-        }
-
-        It "Verifies reading byte[] type from binary vault" {
-            $blob = Get-Secret -Name BinVaultBlob -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            [System.Text.Encoding]::UTF8.GetString($blob) | Should -BeExactly "BinVaultHelloStr"
-        }
-
-        It "Verifies enumerating byte[] type from binary vault" {
-            $blobInfo = Get-SecretInfo -Name BinVaultBlob -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            $blobInfo.Name | Should -BeExactly "BinVaultBlob"
-            $blobInfo.TypeName | Should -BeExactly "ByteArray"
-            $blobInfo.Vault | Should -BeExactly "BinaryTestVault"
-        }
-
-        It "Verifies removing byte[] type from binary vault" {
-            Remove-Secret -Name BinVaultBlob -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            { Get-Secret -Name BinVaultBlob -Vault BinaryTestVault -ErrorAction Stop } | Should -Throw `
-                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
-        }
+        VerifyByteArrayType -Title "binary" -VaultName "BinaryTestVault"
     }
 
     Context "Binary extension vault string type tests" {
 
         [VaultExtension.Store]::Dict.Clear()
 
-        It "Verifies writing string type to binary vault" {
-            Add-Secret -Name BinVaultStr -Secret "HelloBinVault" -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-        }
-
-        It "Verifies reading string type from binary vault" {
-            $str = Get-Secret -Name BinVaultStr -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            $str | Should -BeExactly "HelloBinVault"
-        }
-
-        It "Verifies enumerating string type from binary vault" {
-            $strInfo = Get-SecretInfo -Name BinVaultStr -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            $strInfo.Name | Should -BeExactly "BinVaultStr"
-            $strInfo.TypeName | Should -BeExactly "String"
-            $strInfo.Vault | Should -BeExactly "BinaryTestVault"
-        }
-
-        It "Verifies removing string type from binary vault" {
-            Remove-Secret -Name BinVaultStr -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            { Get-Secret -Name BinVaultStr -Vault BinaryTestVault -ErrorAction Stop } | Should -Throw `
-                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
-        }
+        VerifyStringType -Title "binary" -VaultName "BinaryTestVault"
     }
 
     Context "Binary extension vault SecureString type tests" {
 
         [VaultExtension.Store]::Dict.Clear()
 
-        It "Verifies writing SecureString type to binary vault" {
-            Add-Secret -Name BinVaultSecureStr -Secret (ConvertTo-SecureString "BinVaultSecureStr" -AsPlainText -Force) `
-                -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-        }
-
-        It "Verifies reading SecureString type from binary vault" {
-            $ss = Get-Secret -Name BinVaultSecureStr -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            [System.Net.NetworkCredential]::new('',$ss).Password | Should -BeExactly "BinVaultSecureStr"
-        }
-
-        It "Verifies enumerating SecureString type from binary vault" {
-            $ssInfo = Get-SecretInfo -Name BinVaultSecureStr -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            $ssInfo.Name | Should -BeExactly "BinVaultSecureStr"
-            $ssInfo.TypeName | Should -BeExactly "SecureString"
-            $ssInfo.Vault | Should -BeExactly "BinaryTestVault"
-        }
-
-        It "Verifies removing SecureString type from binary vault" {
-            Remove-Secret -Name BinVaultSecureStr -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            { Get-Secret -Name BinVaultSecureStr -Vault BinaryTestVault -ErrorAction Stop } | Should -Throw `
-                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
-        }
+        VerifySecureStringType -Title "binary" -VaultName "BinaryTestVault"
     }
 
     Context "Binary extension vault PSCredential type tests" {
 
         [VaultExtension.Store]::Dict.Clear()
 
-        It "Verifies writing PSCredential to binary vault" {
-            $cred = [pscredential]::new('UserName', (ConvertTo-SecureString "UserSecret" -AsPlainText -Force))
-            Add-Secret -Name BinVaultCred -Secret $cred -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-        }
-
-        It "Verifies reading PSCredential type from binary vault" {
-            $cred = Get-Secret -Name BinVaultCred -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            $cred.UserName | Should -BeExactly "UserName"
-            [System.Net.NetworkCredential]::new('', ($cred.Password)).Password | Should -BeExactly "UserSecret"
-        }
-
-        It "Verifies enumerating PSCredential type from binary vault" {
-            $credInfo = Get-SecretInfo -Name BinVaultCred -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            $credInfo.Name | Should -BeExactly "BinVaultCred"
-            $credInfo.TypeName | Should -BeExactly "PSCredential"
-            $credInfo.Vault | Should -BeExactly "BinaryTestVault"
-        }
-
-        It "Verifies removing PSCredential type from binary vault" {
-            Remove-Secret -Name BinVaultCred -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            { Get-Secret -Name BinVaultCred -Vault BinaryTestVault -ErrorAction Stop } | Should -Throw `
-                -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
-        }
+        VerifyPSCredentialType -Title "binary" -VaultName "BinaryTestVault"
     }
 
     Context "Binary extension vault Hashtable type tests" {
 
         [VaultExtension.Store]::Dict.Clear()
 
-        It "Verifies writing Hashtable to binary vault" {
-            $ht = @{ 
-                Blob = ([byte[]] @(1,2))
-                Str = "Hello"
-                SecureString = (ConvertTo-SecureString "SecureHello" -AsPlainText -Force)
-                Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString "UserASecret" -AsPlainText -Force)))
-            }
-            Add-Secret -Name BinVaultHT -Vault BinaryTestVault -Secret $ht -ErrorVariable err
-            $err.Count | Should -Be 0
-        }
-
-        It "Verifies reading Hashtable from binary vault" {
-            $ht = Get-Secret -Name BinVaultHT -Vault BinaryTestVault -ErrorVariable err
-            $err.Count | Should -Be 0
-            $ht.Blob.Count | Should -Be 2
-            $ht.Str | Should -BeExactly "Hello"
-            [System.Net.NetworkCredential]::new('', $ht.SecureString).Password | Should -BeExactly "SecureHello"
-            $ht.Cred.UserName | Should -BeExactly "UserA"
-            [System.Net.NetworkCredential]::new('', $ht.Cred.Password).Password | Should -BeExactly "UserASecret"
-        }
-
-        # TODO:
+        VerifyHashType -Title "binary" -VaultName "BinaryTestVault"
     }
 
     Context "Script extension vault tests" {
@@ -482,5 +657,40 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         It "Should throw error when registering existing registered vault extension" {
             { Register-SecretsVault -Name ScriptTestVault -ModuleName $script:binModuleFilePath -VaultParameters @{ Param1 = "Hello" } } | Should -Throw -ErrorId 'RegisterSecretsVaultInvalidVaultName'
         }
+    }
+
+    Context "Script extension vault byte[] type tests" {
+
+        [VaultExtension.Store]::Dict.Clear()
+
+        VerifyByteArrayType -Title "script" -VaultName "ScriptTestVault"
+    }
+
+    Context "Script extension vault String type tests" {
+
+        [VaultExtension.Store]::Dict.Clear()
+
+        VerifyStringType -Title "script" -VaultName "ScriptTestVault"
+    }
+
+    Context "Script extension vault SecureString type tests" {
+
+        [VaultExtension.Store]::Dict.Clear()
+
+        VerifySecureStringType -Title "script" -VaultName "ScriptTestVault"
+    }
+
+    Context "Script extension vault PSCredential type tests" {
+
+        [VaultExtension.Store]::Dict.Clear()
+
+        VerifyPSCredentialType -Title "script" -VaultName "ScriptTestVault"
+    }
+
+    Context "Script extension vault Hashtable type tests" {
+
+        [VaultExtension.Store]::Dict.Clear()
+
+        VerifyHashType -Title "script" -VaultName "ScriptTestVault"
     }
 }
