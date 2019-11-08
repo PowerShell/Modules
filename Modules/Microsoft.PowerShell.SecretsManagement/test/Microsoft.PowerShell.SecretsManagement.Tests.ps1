@@ -7,7 +7,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         Import-Module -Name Microsoft.PowerShell.SecretsManagement;
 
-        # Binary
+        # Binary extension module
         $classImplementation = @'
             using Microsoft.PowerShell.SecretsManagement;
             using System;
@@ -140,7 +140,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             "@{ ModuleVersion = '1.0'; RequiredAssemblies = @('$assemblyFileName') }" | Out-File -FilePath $script:binModuleFilePath
         }
 
-        # Script
+        # Script extension module
         $scriptImplementation = @'
             $script:store = [VaultExtension.Store]::Dict
 
