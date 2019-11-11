@@ -7,7 +7,6 @@ param (
     [Parameter(Mandatory=$true)]
     [ValidateNotNullOrEmpty()]
     [string] $ModuleInstallPath,
-
     [switch] $Force
 )
 
