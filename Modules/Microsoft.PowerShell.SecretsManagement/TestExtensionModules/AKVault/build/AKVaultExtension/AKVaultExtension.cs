@@ -64,14 +64,9 @@ namespace AKVaultExtension
 
         private const string EnumerateSecretsScript = @"
             param (
-                [string] $Filter,
+                [string] $Filter = ""*"",
                 [string] $VaultName
             )
-
-            if ([string]::IsNullOrEmpty($Filter))
-            {
-                $Filter = ""*""
-            }
 
             $pattern = [WildcardPattern]::new($Filter)
             $vaultSecretInfos = Az.KeyVault\Get-AzKeyVaultSecret -VaultName $VaultName
