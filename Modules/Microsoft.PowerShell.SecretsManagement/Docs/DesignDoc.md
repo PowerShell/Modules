@@ -51,7 +51,7 @@ Secret objects supported by this module are currently limited to:
 ## Vault extension registration
 
 Extension vaults are registered to a user context.
-Information about the extension vault is collected via a registration cmdlet and information is stored as a json file in a current user based location.  
+Information about the extension vault is collected via a registration cmdlet and information is stored as a json file in a user context based location.  
 
 Example:
 
@@ -191,7 +191,7 @@ Unregister-SecretsVault
 
 `Register-SecretsVault` registers a PowerShell module as an extension vault for the current user context.
 Validation is performed to ensure the module either provides the required binary with implementing type or the required script commands.
-If a dictionary of additional parameters is specified then it will be stored securely in the built-in local vault, assuming that some parameter arguments likely contain secrets.  
+If a dictionary of additional parameters is specified then it will be stored securely in the built-in local vault.  
 
 `Get-SecretsVault` returns a list of extension vaults currently registered in the user context.  
 
