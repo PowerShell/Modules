@@ -22,7 +22,7 @@ function DoBuild
     copy-item "${SrcPath}/${ModuleName}.psm1" "${OutDirectory}/${ModuleName}"
 
     # copy format files here
-    #
+    copy-item "${SrcPath}/${ModuleName}.format.ps1xml" "${OutDirectory}/${ModuleName}"
 
     # copy help
     Write-Verbose -Verbose -Message "Copying help files to '$BuildOutPath'"
@@ -33,8 +33,10 @@ function DoBuild
         # build code and place it in the staging location
         Push-Location "${SrcPath}/code"
         try {
+            # Build source
             dotnet publish --configuration $BuildConfiguration --framework $BuildFramework
 
+            # Place build results
             if (! (Test-Path -Path "$BuildSrcPath/${ModuleName}.dll"))
             {
                 throw "Expected binary was not created: $BuildSrcPath/${ModuleName}.dll"
