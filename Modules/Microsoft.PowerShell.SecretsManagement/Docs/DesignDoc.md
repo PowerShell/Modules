@@ -15,7 +15,7 @@ Example:
 Import-Module Microsoft.PowerShell.SecretsManagement
 
 # Publish a module to the PowerShell Gallery
-Publish-Module -Path C:\Modules\Publish\MyNewModule -NuGetApiKey (Get-Secret NuGetApiKey)
+Publish-Module -Path C:\Modules\Publish\MyNewModule -NuGetApiKey (Get-Secret NuGetApiKey -AsPlainText)
 
 # Run management script on multiple machines
 Invoke-Command -Cn $machines -FilePath .\MyMgmtScript.ps1 -Credential (Get-Secret MgmtCred)
@@ -47,6 +47,11 @@ Secret objects supported by this module are currently limited to:
 - PSCredential - PowerShell credential secret
 
 - Hashtable - Hash table of name value pairs, where values are restricted to the above secret types.
+
+String secret types are always stored as SecureString types.
+When adding a string secret type, the (Add-Secret) cmdlet will accept a String type but then convert it to SecureString type for storage.
+When retrieving the secret, the (Get-Secret) cmdlet will return a SecureString type unless the `-AsPlainText` parameter switch is used.
+See the [Security]() section of this document for more information.  
 
 ## Vault extension registration
 
@@ -208,15 +213,16 @@ Get-SecretInfo
 Remove-Secret
 ```
 
-`Add-Secret` Adds a secret to a specified vault.
+`Add-Secret` Adds a secret to a specified vault.  
 
 `Get-Secret` returns a single secret from a given name.
+A SecureString secret will be returned as plain text if the `-AsPlainText` parameter switch is used.  
 
 `Get-SecretInfo` returns information about each secret stored in all registered vaults, including the built-in local vault.
 This does not return the actual secret, which can only be obtained via the `Get-Secret` cmdlet.
-Information returned is `Name, TypeName, VaultName`.
+Information returned is `Name, TypeName, VaultName`.  
 
-`Remove-Secret` removes a secret by name from a given vault.
+`Remove-Secret` removes a secret by name from a given vault.  
 
 ## Security
 
@@ -233,3 +239,15 @@ The local built-in vault implementations (for different platforms) will use know
 The Secrets Management module makes a best effort to zero out any intermediate secret objects not returned to the user.
 For example byte arrays used in storing and retrieving SecureString blobs are zeroed out after use.
 But strings are immutable in C# and cannot be easily or reliably altered, and so must rely on the CLR garbage collection.
+
+### Plain text secrets
+
+The Secrets Management module supports storing and retrieving plain text secret types, such as passwords and API keys.
+But the plain text String type will be converted to SecureString type internally before it is stored in the specified vault.
+When retrieving the secret, the user has to specifically request that it be returned as plain text via the `-AsPlainText` parameter.
+This is to prevent inadvertent exposure of secrets as plain text for display or to transcript or logging collections.  
+
+On Windows platform, SecureString types contain an encrypted version of the text data that is keyed to the current user context and local machine.
+But for all other platforms (Linux, macOS) encryption is not possible so the SecureString type contains an unencrypted blob of the text.
+But SecureString still serves a purpose on non-Windows platforms, since it will not provide the plain text directly and another dotNet API is needed to return the string contents in plain text.
+So on non-Windows platforms SecureString still provides some security through obscurity (but not encryption).
