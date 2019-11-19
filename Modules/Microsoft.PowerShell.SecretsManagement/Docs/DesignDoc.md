@@ -46,12 +46,7 @@ Secret objects supported by this module are currently limited to:
 
 - PSCredential - PowerShell credential secret
 
-- Hashtable - Hash table of name value pairs, where values are restricted to the above secret types.
-
-String secret types are always stored as SecureString types.
-When adding a string secret type, the (Add-Secret) cmdlet will accept a String type but then convert it to SecureString type for storage.
-When retrieving the secret, the (Get-Secret) cmdlet will return a SecureString type unless the `-AsPlainText` parameter switch is used.
-See the [Security]() section of this document for more information.  
+- Hashtable - Hash table of name value pairs, where values are restricted to the above secret types.  
 
 ## Vault extension registration
 
@@ -216,7 +211,9 @@ Remove-Secret
 `Add-Secret` Adds a secret to a specified vault.  
 
 `Get-Secret` returns a single secret from a given name.
-A SecureString secret will be returned as plain text if the `-AsPlainText` parameter switch is used.  
+When retrieving a string secret type, the Get-Secret cmdlet will convert the string secret to a SecureString type and return that.
+Unless the `-AsPlainText` switch is used, in which case the secret string will be returned as plain text.
+See the [Security]() section of this document for more information.  
 
 `Get-SecretInfo` returns information about each secret stored in all registered vaults, including the built-in local vault.
 This does not return the actual secret, which can only be obtained via the `Get-Secret` cmdlet.
@@ -243,9 +240,9 @@ But strings are immutable in C# and cannot be easily or reliably altered, and so
 ### Plain text secrets
 
 The Secrets Management module supports storing and retrieving plain text secret types, such as passwords and API keys.
-But the plain text String type will be converted to SecureString type internally before it is stored in the specified vault.
-When retrieving the secret, the user has to specifically request that it be returned as plain text via the `-AsPlainText` parameter.
-This is to prevent inadvertent exposure of secrets as plain text for display or to transcript or logging collections.  
+The secret string type will be stored securely, but when retrieved will be converted to a SecureString type.
+Unless the user specifically requests the secret string to be returned as plain text by using the `-AsPlainText` switch on the `Get-Secret` cmdlet.
+This is to prevent inadvertent exposure of secrets as plain text to a display or transcript/history/log collections.  
 
 On Windows platform, SecureString types contain an encrypted version of the text data that is keyed to the current user context and local machine.
 But for all other platforms (Linux, macOS) encryption is not possible so the SecureString type contains an unencrypted blob of the text.

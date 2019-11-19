@@ -297,6 +297,10 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         It "Verifies string read from local store" {
             $strRead = Get-Secret -Name __Test_String_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
+            ($strRead -is [SecureString]) | Should -BeTrue
+
+            $strRead = Get-Secret -Name __Test_String_ -Vault BuiltInLocalVault -AsPlainText -ErrorVariable err
+            $err.Count | Should -Be 0
             $strRead | Should -BeExactly "Hello!!Secret"
         }
 
@@ -464,6 +468,10 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         It "Verifies reading string type from $Title vault" {
             $str = Get-Secret -Name BinVaultStr -Vault $VaultName -ErrorVariable err
+            $err.Count | Should -Be 0
+            ($str -is [SecureString]) | Should -BeTrue
+
+            $str = Get-Secret -Name BinVaultStr -Vault $VaultName -AsPlainText -ErrorVariable err
             $err.Count | Should -Be 0
             $str | Should -BeExactly "HelloBinVault"
         }

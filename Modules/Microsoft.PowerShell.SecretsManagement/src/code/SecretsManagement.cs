@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Management.Automation;
+using System.Security;
 
 using Dbg = System.Diagnostics.Debug;
 
@@ -814,6 +815,13 @@ namespace Microsoft.PowerShell.SecretsManagement
         [Parameter(Position=1)]
         public string Vault { get; set; }
 
+        /// <summary>
+        /// Gets or sets a switch that forces a string secret type to be returned as plain text.
+        /// Otherwise the string is returned as a SecureString type.
+        /// </summary>
+        [Parameter(Position=2)]
+        public SwitchParameter AsPlainText { get; set; }
+
         #endregion
 
         #region Overrides
@@ -850,7 +858,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                 if (result != null)
                 {
-                    WriteObject(result);
+                    WriteSecret(result);
                 }
                 else
                 {
@@ -877,7 +885,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         
                     if (result != null)
                     {
-                        WriteObject(result);
+                        WriteSecret(result);
                         return;
                     }
                 }
@@ -899,6 +907,32 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Private methods
 
+        private void WriteSecret(object secret)
+        {
+            if (!AsPlainText && secret is string stringSecret)
+            {
+                // Write a string secret type only if explicitly requested with the -AsPlainText
+                // parameter switch.  Otherwise return it as a SecureString type.
+                WriteObject(ConvertToSecureString(stringSecret));
+                return;
+            }
+
+            WriteObject(secret);
+        }
+
+        private SecureString ConvertToSecureString(string secret)
+        {
+            var results = InvokeCommand.InvokeScript(
+                @"
+                    param ([string] $secret)
+
+                    ConvertTo-SecureString -String $secret -AsPlainText -Force
+                ",
+                new object[] { secret });
+            
+            return (results.Count == 1) ? results[0].BaseObject as SecureString : null;
+        }
+
         private void WriteNotFoundError()
         {
             var msg = string.Format(CultureInfo.InvariantCulture, "The secret {0} was not found.", Name);
@@ -918,7 +952,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 outObject: out object outObject,
                 ref errorCode))
             {
-                WriteObject(outObject);
+                WriteSecret(outObject);
                 return true;
             }
 
@@ -1131,139 +1165,6 @@ namespace Microsoft.PowerShell.SecretsManagement
         }
 
         #endregion
-    }
-
-    #endregion
-
-    #region Test Only
-
-    [Cmdlet(VerbsCommon.Add, "LocalSecret")]
-    public sealed class AddLocalSecretCommand : PSCmdlet
-    {
-        [Parameter(Position=0, Mandatory=true)]
-        [ValidateNotNullOrEmpty]
-        public string Name { get; set; }
-
-        [Parameter(Position=1, Mandatory=true)]
-        [ValidateNotNullOrEmpty]
-        public PSObject Secret { get; set; }
-
-        protected override void EndProcessing()
-        {
-            try
-            {
-                int errorCode = 0;
-                if (!LocalSecretStore.WriteObject(
-                    Name,
-                    Secret.BaseObject,
-                    ref errorCode))
-                {
-                    var msg = LocalSecretStore.GetErrorMessage(errorCode);
-                    WriteError(
-                        new ErrorRecord(
-                            new System.InvalidOperationException(
-                                string.Format(CultureInfo.InvariantCulture, "Failed to write secret {0} to vault, with error: {1}", Name, msg)),
-                                "SecretWriteError",
-                                ErrorCategory.InvalidOperation,
-                                this));
-                }
-            }
-            catch (System.Exception ex)
-            {
-                WriteError(
-                    new ErrorRecord(
-                        ex,
-                        "SecretWriteError",
-                        ErrorCategory.InvalidOperation,
-                        this));
-            }
-        }
-    }
-
-    [Cmdlet(VerbsCommon.Get, "LocalSecret")]
-    public sealed class GetLocalSecretCommand : PSCmdlet
-    {
-        [Parameter(Position=0)]
-        public string Name { get; set; }
-
-        [Parameter]
-        public SwitchParameter All { get; set; }
-
-        protected override void EndProcessing()
-        {
-            int errorCode = 0;
-            string msg = null;
-
-            if (!string.IsNullOrEmpty(Name) && (Name.IndexOf('*') < 0))
-            {
-                if (LocalSecretStore.ReadObject(
-                    Name,
-                    out object outObject,
-                    ref errorCode))
-                {
-                    WriteObject(outObject);
-                    return;
-                }
-
-                msg = LocalSecretStore.GetErrorMessage(errorCode);
-                WriteError(
-                    new ErrorRecord(
-                        new System.InvalidOperationException(
-                            string.Format(CultureInfo.InvariantCulture, "Failed to read secret {0} from vault, with error: {1}", Name, msg)),
-                            "SecretWriteError",
-                            ErrorCategory.InvalidOperation,
-                            this));
-
-                return;
-            }
-
-            // Enumerate allowing wildcards in name, used as a filter parameter.
-            var filter = Name?? "*";
-            if (LocalSecretStore.EnumerateObjects(
-                filter,
-                All,
-                out KeyValuePair<string,object>[] outObjects,
-                ref errorCode))
-            {
-                WriteObject(outObjects);
-                return;
-            }
-
-            msg = LocalSecretStore.GetErrorMessage(errorCode);
-            WriteError(
-                new ErrorRecord(
-                    new System.InvalidOperationException(
-                        string.Format(CultureInfo.InvariantCulture, "Failed to find secrets {0} in vault, with error: {1}", Name, msg)),
-                        "SecretWriteError",
-                        ErrorCategory.InvalidOperation,
-                        this));
-        }
-    }
-
-    [Cmdlet(VerbsCommon.Remove, "LocalSecret")]
-    public sealed class RemoveLocalSecretCommand : PSCmdlet
-    {
-        [Parameter(Position=0, Mandatory=true)]
-        public string Name { get; set; }
-
-        protected override void EndProcessing()
-        {
-            int errorCode = 0;
-            
-            if (!LocalSecretStore.DeleteObject(
-                Name,
-                ref errorCode))
-            {
-                var msg = LocalSecretStore.GetErrorMessage(errorCode);
-                WriteError(
-                    new ErrorRecord(
-                        new System.InvalidOperationException(
-                            string.Format(CultureInfo.InvariantCulture, "Failed to remove secret {0} in vault, with error: {1}", Name, msg)),
-                        "SecretRemoveError",
-                        ErrorCategory.InvalidOperation,
-                        this));
-            }
-        }
     }
 
     #endregion
