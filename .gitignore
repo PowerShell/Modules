@@ -1,0 +1,7 @@
+# directories created during build
+bin/
+obj/
+project.lock.json
+
+# VSCode directories that are not at the repository root
+/**/.vscode/

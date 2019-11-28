@@ -1,0 +1,232 @@
+<Configuration>
+    <ViewDefinitions>
+        <View>
+            <Name>Inline</Name>
+            <ViewSelectedBy>
+                <TypeName>Microsoft.PowerShell.TextUtility.CompareTextDiff</TypeName>
+            </ViewSelectedBy>
+            <CustomControl>
+                <CustomEntries>
+                    <CustomEntry>
+                        <CustomItem>
+                            <ExpressionBinding>
+                                <ScriptBlock>
+                                    Set-StrictMode -Off
+
+                                    $deleteColor = "`e[1;9;31m"
+                                    $insertColor = "`e[0;1;32m"
+                                    $resetColor = "`e[0m"
+                                    $textBuilder = [System.Text.StringBuilder]::new()
+                                    $newline = [System.Environment]::NewLine
+
+                                    $addNewLine = $false
+                                    if ($_.LeftFile) {
+                                        $null = $textBuilder.Append("${deleteColor}File:${resetColor} $($_.LeftFile)${newline}")
+                                        $addNewLine = $true
+                                    }
+
+                                    if ($_.RightFile) {
+                                        $null = $textBuilder.Append("${insertColor}File:${resetColor} $($_.RightFile)${newline}")
+                                        $addNewLine = $true
+                                    }
+
+                                    if ($addNewLine) {
+                                        $null = $textBuilder.Append($newline)
+                                    }
+
+                                    foreach ($diff in $_.Diff) {
+                                        $text = $diff.text
+                                        switch ($diff.Operation)
+                                        {
+                                            "EQUAL" {
+                                                $null = $textBuilder.Append($text)
+                                            }
+
+                                            "DELETE" {
+                                                $null = $textBuilder.Append("${deleteColor}${text}${resetColor}")
+                                            }
+
+                                            "INSERT" {
+                                                $null = $textBuilder.Append("${insertColor}${text}${resetColor}")
+                                            }
+                                        }
+                                    }
+
+                                    $textBuilder.ToString()
+                                </ScriptBlock>
+                            </ExpressionBinding>
+                        </CustomItem>
+                    </CustomEntry>
+                </CustomEntries>
+            </CustomControl>
+        </View>
+        <View>
+            <Name>SideBySide</Name>
+            <ViewSelectedBy>
+                <TypeName>Microsoft.PowerShell.TextUtility.CompareTextDiff#SideBySide</TypeName>
+            </ViewSelectedBy>
+            <CustomControl>
+                <CustomEntries>
+                    <CustomEntry>
+                        <CustomItem>
+                            <ExpressionBinding>
+                                <ScriptBlock>
+                                    Set-StrictMode -Off
+
+                                    $consoleWidth = 120
+                                    try {
+                                        $consoleWidth = [Console]::WindowWidth
+                                    }
+                                    catch {
+                                        # just use default if this fails because there isn't a real console
+                                    }
+
+                                    $deleteText = [System.Text.StringBuilder]::new()
+                                    $insertText = [System.Text.StringBuilder]::new()
+                                    $deleteColor = "`e[1;9;31m"
+                                    $insertColor = "`e[0;1;32m"
+                                    $resetColor = "`e[0m"
+                                    $ellipsis = "`u{2026}"
+                                    $newline = [System.Environment]::NewLine
+
+                                    foreach ($diff in $_.Diff) {
+                                        $text = $diff.text.Replace("`r","")
+
+                                        switch ($diff.operation)
+                                        {
+                                            "EQUAL" {
+                                                $text = $text.Replace("`n","`n${resetColor}")
+                                                $null = $deleteText.Append("${resetColor}${text}")
+                                                $null = $insertText.Append("${resetColor}${text}")
+                                            }
+
+                                            "DELETE" {
+                                                $text = $text.Replace("`n","`n${deleteColor}")
+                                                $null = $deleteText.Append("${deleteColor}${text}")
+                                            }
+
+                                            "INSERT" {
+                                                $text = $text.Replace("`n","`n${insertColor}")
+                                                $null = $insertText.Append("${insertColor}${text}")
+                                            }
+                                        }
+                                    }
+
+                                    function Remove-VT100([string] $text) {
+                                        $text.Replace($deleteColor,"").Replace($insertColor,"").Replace($resetColor,"")
+                                    }
+
+                                    $leftLines = $deleteText.ToString().Split("`n")
+                                    $rightLines = $insertText.ToString().Split("`n")
+                                    $lines = $leftLines.Count
+
+                                    if ($rightLines.Count -gt $lines) {
+                                        $lines = $rightLines.Count
+                                    }
+
+                                    $linesWidth = ($lines + 1).ToString().Length
+                                    # 5 chars for whitespace and pipe after line number and whitespace, pipe, whitespace separating left and right
+                                    [int]$columnWidth = ($consoleWidth - $linesWidth - 5) / 2
+
+                                    # find longest line and use that as the columnWidth if less than current
+                                    $longestWidth = 0
+                                    foreach ($line in $leftLines) {
+                                        $line = Remove-VT100 -text $line
+                                        if ($line.Length -gt $longestWidth) {
+                                            $longestWidth = $line.Length
+                                        }
+                                    }
+
+                                    if ($longestWidth -lt $columnWidth) {
+                                        $columnWidth = $longestWidth
+                                    }
+
+                                    $textOutput = [System.Text.StringBuilder]::new()
+
+                                    if ($_.LeftFile -or $_.RightFile) {
+                                        $prefix = "File: "
+                                        $null = $textOutput.Append("".PadLeft($linesWidth))
+                                        $null = $textOutput.Append("${resetColor} | ")
+                                        if ($_.LeftFile) {
+                                            $leftFile = $_.LeftFile
+                                            if ($leftFile.Length + $prefix.Length -gt $columnWidth) {
+                                                $leftFile = $ellipsis + $leftFile.Remove(0, $leftFile.Length - $columnWidth + 1 + $prefix.Length)
+                                            }
+                                            else {
+                                                $leftFile = $leftFile.PadRight($columnWidth - $prefix.Length)
+                                            }
+
+                                            $leftFile = "${deleteColor}${prefix}${resetColor}${leftFile}"
+                                        }
+                                        else {
+                                            $leftFile = "".PadLeft($columnWidth)
+                                        }
+
+                                        if ($_.RightFile) {
+                                            $rightFile = $_.RightFile
+                                            if ($rightFile.Length + $prefix.Length -gt $columnWidth) {
+                                                $rightFile = $ellipsis + $rightFile.Remove(0, $rightFile.Length - $columnWidth + 1 + $prefix.Length)
+                                            }
+
+                                            $rightFile = "${insertColor}${prefix}${resetColor}${rightFile}"
+                                        }
+
+                                        $null = $textOutput.Append($leftFile)
+                                        $null = $textOutput.Append("${resetColor} | ")
+                                        $null = $textOutput.Append($rightFile)
+                                        $null = $textOutput.Append($newline)
+                                        $null = $textOutput.Append("".PadLeft($linesWidth))
+                                        $null = $textOutput.Append("${resetColor} | ")
+                                        $null = $textOutput.Append("".PadLeft($columnWidth))
+                                        $null = $textOutput.Append(" |")
+                                        $null = $textOutput.Append($newline)
+                                    }
+
+                                    for ($i = 0; $i -lt $lines; $i++) {
+                                        if ($i -ge $leftLines.Count) {
+                                            $leftText = "".PadRight($columnWidth)
+                                        }
+                                        else {
+                                            $lineLength = (Remove-VT100 -text $leftLines[$i]).Length
+                                            if ($lineLength -gt $columnWidth) {
+                                                $leftText = $leftLines[$i].Substring(0, $columnWidth - 1 + ($leftLines[$i].Length - $lineLength)) + $ellipsis
+                                            }
+                                            else {
+                                                $leftText = $leftLines[$i] + "${resetColor}" + "".PadRight($columnWidth - $lineLength)
+                                            }
+                                        }
+
+                                        if ($i -ge $rightLines.Count) {
+                                            $rightText = ""
+                                        }
+                                        else {
+                                            $lineLength = (Remove-VT100 -text $rightLines[$i]).Length
+                                            if ($lineLength -gt $columnWidth) {
+                                                $rightText = $rightLines[$i].Substring(0, $columnWidth - 1 + ($rightLines[$i].Length - $lineLength)) + $ellipsis
+                                            }
+                                            else {
+                                                $rightText = $rightLines[$i]
+                                            }
+                                        }
+
+                                        $lineNumber = ($i + 1).ToString()
+                                        $null = $textOutput.Append($resetColor)
+                                        $null = $textOutput.Append($lineNumber.PadLeft($linesWidth - $lineNumber.Length))
+                                        $null = $textOutput.Append(" | ")
+                                        $null = $textOutput.Append($leftText)
+                                        $null = $textOutput.Append("${resetColor} | ")
+                                        $null = $textOutput.Append($rightText)
+                                        $null = $textOutput.Append($newline)
+                                    }
+
+                                    $null = $textOutput.Append("${resetColor}")
+                                    $textOutput.ToString()
+                                </ScriptBlock>
+                            </ExpressionBinding>
+                        </CustomItem>
+                    </CustomEntry>
+                </CustomEntries>
+            </CustomControl>
+        </View>
+    </ViewDefinitions>
+</Configuration>
