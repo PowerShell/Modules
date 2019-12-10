@@ -909,11 +909,24 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         private void WriteSecret(object secret)
         {
+            if (secret is PSObject secretPSObject)
+            {
+                secret = secretPSObject.BaseObject;
+            }
+
             if (!AsPlainText && secret is string stringSecret)
             {
                 // Write a string secret type only if explicitly requested with the -AsPlainText
                 // parameter switch.  Otherwise return it as a SecureString type.
                 WriteObject(ConvertToSecureString(stringSecret));
+                return;
+            }
+
+            if (AsPlainText && secret is SecureString secureString)
+            {
+                // Convert secure string to plain text.
+                var networkCred = new System.Net.NetworkCredential("", secureString);
+                WriteObject(networkCred.Password);
                 return;
             }
 
@@ -923,12 +936,15 @@ namespace Microsoft.PowerShell.SecretsManagement
         private SecureString ConvertToSecureString(string secret)
         {
             var results = InvokeCommand.InvokeScript(
-                @"
+                script: @"
                     param ([string] $secret)
 
                     ConvertTo-SecureString -String $secret -AsPlainText -Force
                 ",
-                new object[] { secret });
+                useNewScope: false,
+                writeToPipeline: System.Management.Automation.Runspaces.PipelineResultTypes.None,
+                input: null,
+                args: new object[] { secret });
             
             return (results.Count == 1) ? results[0].BaseObject as SecureString : null;
         }
