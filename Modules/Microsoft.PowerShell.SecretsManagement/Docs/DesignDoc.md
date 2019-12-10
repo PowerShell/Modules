@@ -245,6 +245,6 @@ Unless the user specifically requests the secret string to be returned as plain 
 This is to prevent inadvertent exposure of secrets as plain text to a display or transcript/history/log collections.  
 
 On Windows platform, SecureString types contain an encrypted version of the text data that is keyed to the current user context and local machine.
-But for all other platforms (Linux, macOS) encryption is not possible so the SecureString type contains an unencrypted blob of the text.
-But SecureString still serves a purpose on non-Windows platforms, since it will not provide the plain text directly and another dotNet API is needed to return the string contents in plain text.
+But for all other platforms (Linux, macOS) this kind of default encryption is not possible so the dotNet SecureString type contains an unencrypted blob of the text.
+However, SecureString still serves a purpose on non-Windows platforms, since it will not provide the plain text directly, and another dotNet API is needed to return the string contents in plain text.
 So on non-Windows platforms SecureString still provides some security through obscurity (but not encryption).

@@ -2018,6 +2018,9 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                     Import-Module -Name $ModulePath -Scope Local
                 ",
+                useNewScope: false,
+                writeToPipeline: System.Management.Automation.Runspaces.PipelineResultTypes.None,
+                input: null,
                 args: new object[] { this.ModulePath });
         }
 
