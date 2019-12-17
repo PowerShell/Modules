@@ -3,11 +3,11 @@
 
 @{
 
-RootModule = '.\PSRemotingTools.psm1'
+RootModule = './Microsoft.PSRemotingTools.dll'
 
-ModuleVersion = '0.5'
+ModuleVersion = '0.5.0'
 
-GUID = '9eea5519-8e7b-464b-b26d-c9f2ee30fdfb'
+GUID = 'e11d52a1-d5a0-4e4d-92cd-e87114bf4a5c'
 
 Author = 'Microsoft Corporation'
 CompanyName = 'Microsoft Corporation'
@@ -48,3 +48,4 @@ PowerShellVersion = '6.0'
 FunctionsToExport = 'Enable-SSHRemoting'
 
 }
+
