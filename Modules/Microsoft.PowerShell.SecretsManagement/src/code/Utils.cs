@@ -350,6 +350,14 @@ namespace Microsoft.PowerShell.SecretsManagement
             }
         }
 
+        /// <summary>
+        /// Enumerate objects in the vault based on the current user and filter parameter, 
+        /// and return information about each object but not the object itself.
+        /// </summary>
+        /// <param name="filter">Search string for object enumeration.</param>
+        /// <param name="outObjectInfos">Array of name/type pairs for each object.</param>
+        /// <param name="errorCode">Error code or zero.</param>
+        /// <returns>True when objects are found.</returns>
         public static bool EnumerateObjectInfo(
             string filter,
             out KeyValuePair<string, string>[] outObjectInfos,
@@ -416,12 +424,12 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <summary>
         /// Enumerate objects in the vault, based on the filter string, for the current user.
         /// <summary>
-        /// <param name="filter">String with '*' wildcard that determins which objects to return.</param>
+        /// <param name="filter">String with '*' wildcard that determines which objects to return.</param>
         /// <param name="all">Lists all objects in store without the prepended tag.</param>
         /// <param name="outObjects">Array of key/value pairs for each returned object.</param>
         /// <param name="errorCode">Error code or zero.</param>
         /// <returns>True when objects are found and returned.</returns>
-        public static bool EnumerateObjects(
+        internal static bool EnumerateObjects(
             string filter,
             bool all,
             out KeyValuePair<string, object>[] outObjects,
