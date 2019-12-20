@@ -60,6 +60,14 @@ stages:
       displayName: PowerShell Core on macOS
       imageName: macOS-10.14
 
+- stage: Signing
+  displayName: Sign Module Files
+  - template: signing.yml
+
+- stage: Compliance
+  displayName: Compliance
+  - template: compliance.yml
+
 - stage: Release
   displayName: Release Package
   # add `succeeded(),` to the and statement

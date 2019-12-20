@@ -1,0 +1,37 @@
+parameters:
+
+steps:
+
+# Set up for signing
+- pwsh: |
+    $config = Get-PSPackageProjectConfiguration -ConfigPath $PSScriptRoot
+    $signSrcPath = "$($config.OutDirectory)/$($config.ModuleName)"
+    $signOutPath = "$($config.OutDirectory)/$($config.ModuleName)/Signed"
+    if (! Test-Path -Path $signOutPath) {
+      $null = New-Item -Path $signOutPath -ItemType Directory
+    }
+    # Set signing src path variable
+    $vstsCommand = "vso[task.setvariable variable=signSrcPath]${signSrcPath}"
+    Write-Host "sending " + $vstsCommand
+    Write-Host "##$vstsCommandString"
+    # Set signing out path variable
+    $vstsCommand = "vso[task.setvariable variable=signOutPath]${signOutPath}"
+    Write-Host "sending " + vstsCommand
+    Write-Host "##$vstsCommandString"
+    # Set signing xml path
+    $signXmlPath = "${PSScriptRoot}/sign-module-files.xml"
+    $vstsCommand = "vso[task.setvariable variable=signXml]${signXmlPath}"
+    Write-Host "sending " + vstsCommand
+    Write-Host "##$vstsCommandString"
+  displayName: Set up signing
+
+# Sign the module files
+- task: PkgESCodeSign@10
+  displayName: Sign module files
+  inputs:
+    signConfigXml: '$(signXmlPath)'
+    inPathRoot: '$(signSrcPath)'
+    outPathRoot: '$(signOutPath)'
+    binVersion: Production
+    binVersionOverride: ''
+  condition: and(and(succeeded(), eq(variables['Build.Reason'], 'Manual')), ne(variables['SkipSigning'], 'True'))
