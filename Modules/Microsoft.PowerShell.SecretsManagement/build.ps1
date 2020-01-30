@@ -50,6 +50,38 @@ if ( ! ( Get-Module -ErrorAction SilentlyContinue PSPackageProject) ) {
     Install-Module PSPackageProject
 }
 
+# The latest DotNet (3.1.1) is needed to perform binary build.
+$dotNetCmd = Get-Command -Name dotNet -ErrorAction SilentlyContinue
+$dotnetVersion = $null
+if ($dotNetCmd -ne $null) {
+    $info = dotnet --info
+    foreach ($item in $info) {
+        $index = $item.IndexOf('Version:')
+        if ($index -gt -1) {
+            $versionStr = $item.SubString('Version:'.Length + $index)
+            $null = [version]::TryParse($versionStr, [ref] $dotnetVersion)
+            break
+        }
+    }
+}
+# DotNet 3.1.1 is installed in ci.yml.  Just check installation and version here.
+Write-Verbose -Verbose -Message "Installed DotNet found: $($dotNetCmd -ne $null), version: $versionStr"
+<#
+$dotNetVersionOk = ($dotnetVersion -ne $null) -and ((($dotnetVersion.Major -eq 3) -and ($dotnetVersion.Minor -ge 1)) -or ($dotnetVersion.Major -gt 3))
+if (! $dotNetVersionOk) {
+    
+    Write-Verbose -Verbose -Message "Installing dotNet..."
+    $installObtainUrl = "https://dotnet.microsoft.com/download/dotnet-core/scripts/v1"
+
+    Remove-Item -ErrorAction SilentlyContinue -Recurse -Force ~\AppData\Local\Microsoft\dotnet
+    $installScript = "dotnet-install.ps1"
+    Invoke-WebRequest -Uri $installObtainUrl/$installScript -OutFile $installScript
+
+    & ./$installScript -Channel 'release' -Version '3.1.101'
+    Write-Verbose -Verbose -Message "dotNet installation complete."
+}
+#>
+
 if ($Clean -and (Test-Path $OutDirectory))
 {
     Remove-Item -Path $OutDirectory -Force -Recurse -ErrorAction Stop -Verbose

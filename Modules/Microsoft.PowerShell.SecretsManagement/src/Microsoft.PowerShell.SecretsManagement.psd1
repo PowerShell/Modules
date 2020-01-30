@@ -1,6 +1,5 @@
-#
-# Module manifest for module 'Microsoft.PowerShell.SecretsManagement'
-#
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
 
 @{
 
@@ -8,7 +7,7 @@
 RootModule = '.\Microsoft.PowerShell.SecretsManagement.dll'
 
 # Version number of this module.
-ModuleVersion = '1.0.0'
+ModuleVersion = '0.1.0'
 
 # Supported PSEditions
 CompatiblePSEditions = @('Core')
@@ -104,4 +103,3 @@ PrivateData = @{
 # DefaultCommandPrefix = ''
 
 }
-

@@ -1,8 +1,0 @@
-{
-  "BuildOutputPath": "out",
-  "ModuleName": "Microsoft.PSRemotingTools",
-  "TestPath": "test",
-  "Culture": "en-US",
-  "HelpPath": "help",
-  "SourcePath": "src"
-}
