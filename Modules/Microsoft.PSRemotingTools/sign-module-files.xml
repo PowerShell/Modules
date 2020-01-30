@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8" ?>
-
-<!-- Config files for Azure DevOps code-signing pipeline. -->
-<SignConfigXML>
-  <job platform="" configuration="" dest="__OUTPATHROOT__\signed" jobname="PSRemotingTools" approvers="vigarg;gstolt">
-    <file src="__INPATHROOT__\Microsoft.PSRemotingTools.psd1" signType="AuthenticodeFormer" dest="__OUTPATHROOT__\Microsoft.PSRemotingTools.psd1" />
-    <file src="__INPATHROOT__\Microsoft.PSRemotingTools.psm1" signType="AuthenticodeFormer" dest="__OUTPATHROOT__\Microsoft.PSRemotingTools.psm1" />
-  </job>
-</SignConfigXML>

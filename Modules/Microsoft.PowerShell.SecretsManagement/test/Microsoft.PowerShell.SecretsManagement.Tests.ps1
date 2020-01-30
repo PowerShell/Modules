@@ -5,7 +5,10 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
     BeforeAll {
 
-        Import-Module -Name Microsoft.PowerShell.SecretsManagement;
+        if ((Get-Module -Name Microsoft.PowerShell.SecretsManagement -ErrorAction Ignore) -eq $null)
+        {
+            Import-Module -Name Microsoft.PowerShell.SecretsManagement
+        }
 
         # Binary extension module
         $classImplementation = @'

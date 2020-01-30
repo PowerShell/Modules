@@ -17,14 +17,15 @@ function DoBuild
     $BuildSrcPath = "bin/${BuildConfiguration}/${BuildFramework}/publish"
     Write-Verbose -Verbose -Message "Module build source path: '$BuildSrcPath'"
 
-    # copy psm1 and psd1 files
-    copy-item "${SrcPath}/${ModuleName}.psd1" "${OutDirectory}/${ModuleName}"
-    copy-item "${SrcPath}/${ModuleName}.psm1" "${OutDirectory}/${ModuleName}"
+    # Copy psd1 file
+    Write-Verbose -Verbose "Copy-Item ${SrcPath}/${ModuleName}.psd1 to ${OutDirectory}/${ModuleName}"
+    Copy-Item "${SrcPath}/${ModuleName}.psd1" "${OutDirectory}/${ModuleName}"
 
-    # copy format files here
+    # Copy format files here
+    Write-Verbose -Verbose "Copy-Item ${SrcPath}/${ModuleName}.format.ps1xml to ${OutDirectory}/${ModuleName}"
     copy-item "${SrcPath}/${ModuleName}.format.ps1xml" "${OutDirectory}/${ModuleName}"
 
-    # copy help
+    # Copy help
     Write-Verbose -Verbose -Message "Copying help files to '$BuildOutPath'"
     copy-item -Recurse "${HelpPath}/${Culture}" "$BuildOutPath"
 
@@ -34,22 +35,30 @@ function DoBuild
         Push-Location "${SrcPath}/code"
         try {
             # Build source
-            dotnet publish --configuration $BuildConfiguration --framework $BuildFramework
+            Write-Verbose -Verbose -Message "Building with configuration: $BuildConfiguration, framework: $BuildFramework"
+            Write-Verbose -Verbose -Message "Building location: PSScriptRoot: $PSScriptRoot, PWD: $pwd"
+            dotnet publish --configuration $BuildConfiguration --framework $BuildFramework --output $BuildSrcPath
+
+            # Debug: Check 
 
             # Place build results
             if (! (Test-Path -Path "$BuildSrcPath/${ModuleName}.dll"))
             {
                 throw "Expected binary was not created: $BuildSrcPath/${ModuleName}.dll"
             }
+
+            Write-Verbose -Verbose -Message "Copying $BuildSrcPath/${ModuleName}.dll to $BuildOutPath"
             Copy-Item "$BuildSrcPath/${ModuleName}.dll" -Dest "$BuildOutPath"
             
             if (Test-Path -Path "$BuildSrcPath/${ModuleName}.pdb")
             {
+                Write-Verbose -Verbose -Message "Copying $BuildSrcPath/${ModuleName}.pdb to $BuildOutPath"
                 Copy-Item -Path "$BuildSrcPath/${ModuleName}.pdb" -Dest "$BuildOutPath"
             }
         }
         catch {
-            Write-Error "dotnet build failed with error: $_"
+            # Write-Error "dotnet build failed with error: $_"
+            Write-Verbose -Verbose -Message "dotnet build failed with error: $_"
         }
         finally {
             Pop-Location

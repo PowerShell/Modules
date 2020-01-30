@@ -45,11 +45,11 @@ jobs:
     displayName: Execute functional tests
     errorActionPreference: continue
 
-  - ${{ parameters.powershellExecutable }}: |
-      Invoke-PSPackageProjectTest -Type StaticAnalysis
-    displayName: Execute static analysis tests
-    errorActionPreference: continue
-    condition: succeededOrFailed()
+#  - ${{ parameters.powershellExecutable }}: |
+#      Invoke-PSPackageProjectTest -Type StaticAnalysis
+#    displayName: Execute static analysis tests
+#    errorActionPreference: continue
+#    condition: succeededOrFailed()
 
   - ${{ parameters.powershellExecutable }}: |
       Unregister-PSRepository -Name 'pspackageproject-local-repo' -ErrorAction Ignore
