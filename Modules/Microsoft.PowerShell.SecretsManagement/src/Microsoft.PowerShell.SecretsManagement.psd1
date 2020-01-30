@@ -30,6 +30,8 @@ This module helps manage secrets by providing a set of cmdlets that lets you sto
 locally using a local vault provider, and access secrets from remote vaults.
 Local and remote vaults can be registered and unregistered on the local machine, per user,
 for use in managing and retrieving secrets.
+
+*** This is an alpha version of the module that currently works only on Windows platforms ***
 "
 
 # Minimum version of the PowerShell engine required by this module
@@ -37,9 +39,6 @@ PowerShellVersion = '5.1'
 
 # Format files (.ps1xml) to be loaded when importing this module
 FormatsToProcess = @('Microsoft.PowerShell.SecretsManagement.format.ps1xml')
-
-# Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
-# NestedModules = @()
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
 FunctionsToExport = @()
@@ -54,15 +53,6 @@ VariablesToExport = '*'
 
 # Aliases to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no aliases to export.
 AliasesToExport = @()
-
-# DSC resources to export from this module
-# DscResourcesToExport = @()
-
-# List of all modules packaged with this module
-# ModuleList = @()
-
-# List of all files packaged with this module
-# FileList = @()
 
 # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
 PrivateData = @{
@@ -85,7 +75,7 @@ PrivateData = @{
         # ReleaseNotes = ''
 
         # Prerelease string of this module
-        # Prerelease = ''
+        Prerelease = 'alpha1'
 
         # Flag to indicate whether the module requires explicit user acceptance for install/update/save
         # RequireLicenseAcceptance = $false
@@ -98,8 +88,5 @@ PrivateData = @{
 
 # HelpInfo URI of this module
 # HelpInfoURI = ''
-
-# Default prefix for commands exported from this module. Override the default prefix using Import-Module -Prefix.
-# DefaultCommandPrefix = ''
 
 }
