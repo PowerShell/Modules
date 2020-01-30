@@ -1,0 +1,9 @@
+{
+  "BuildOutputPath": "out",
+  "ModuleName": "Microsoft.PowerShell.RemotingTools",
+  "TestPath": "test",
+  "Culture": "en-US",
+  "HelpPath": "help",
+  "SourcePath": "src",
+  "SignedOutputPath": "signed"
+}
