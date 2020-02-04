@@ -14,7 +14,6 @@ jobs:
   - task: securedevelopmentteam.vss-secure-development-tools.build-task-credscan.CredScan@2
     displayName: 'Scan for Secrets'
     inputs:
-      suppressionsFile: tools/credScan/suppress.json
       toolMajorVersion: V2
       debugMode: false
 
