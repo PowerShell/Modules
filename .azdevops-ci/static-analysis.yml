@@ -1,6 +1,6 @@
 name: PR-$(System.PullRequest.PullRequestNumber)-$(Date:yyyyMMdd)$(Rev:.rr)
 trigger:
-  # Batch merge builds together while a merge build is running
+  # Batch merge builds together while a merge build is  running
   batch: true
   branches:
     include:
