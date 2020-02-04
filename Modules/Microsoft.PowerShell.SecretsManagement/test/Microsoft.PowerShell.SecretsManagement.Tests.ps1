@@ -324,7 +324,8 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
     Context "Built-in local store SecureString type" {
 
-        $secureStringToWrite = ConvertTo-SecureString -String "SSHello!!!" -AsPlainText -Force
+	$randomSecret = [System.IO.Path]::GetRandomFileName()
+        $secureStringToWrite = ConvertTo-SecureString -String $randomSecret -AsPlainText -Force
 
         It "Verifies SecureString write to local store" {
             Add-Secret -Name __Test_SecureString_ -Secret $secureStringToWrite -Vault BuiltInLocalVault -ErrorVariable err
@@ -334,7 +335,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         It "Verifies SecureString read from local store" {
             $ssRead = Get-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
-            [System.Net.NetworkCredential]::new('',$ssRead).Password | Should -BeExactly 'SSHello!!!'
+            [System.Net.NetworkCredential]::new('',$ssRead).Password | Should -BeExactly $randomSecret
         }
 
         It "Verifies SecureString enumeration from local store" {
@@ -355,8 +356,10 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
     Context "Built-in local store PSCredential type" {
 
+        $randomSecret = [System.IO.Path]::GetRandomFileName()
+
         It "Verifies PSCredential type write to local store" {
-            $cred = [pscredential]::new('UserL', (ConvertTo-SecureString "UserLSecret" -AsPlainText -Force))
+            $cred = [pscredential]::new('UserL', (ConvertTo-SecureString $randomSecret -AsPlainText -Force))
             Add-Secret -Name __Test_PSCredential_ -Secret $cred -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
         }
@@ -365,7 +368,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $cred = Get-Secret -Name __Test_PSCredential_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
             $cred.UserName | Should -BeExactly "UserL"
-            [System.Net.NetworkCredential]::new('', ($cred.Password)).Password | Should -BeExactly "UserLSecret"
+            [System.Net.NetworkCredential]::new('', ($cred.Password)).Password | Should -BeExactly $randomSecret
         }
 
         It "Verifies PSCredential enumeration from local store" {
@@ -384,13 +387,15 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
     }
 
     Context "Built-in local store Hashtable type" {
+        $randomSecretA = [System.IO.Path]::GetRandomFileName()
+        $randomSecretB = [System.IO.Path]::GetRandomFileName()
 
         It "Verifies Hashtable type write to local store" {
             $ht = @{
                 Blob = ([byte[]] @(1,2))
                 Str = "Hello"
-                SecureString = (ConvertTo-SecureString "SecureHello" -AsPlainText -Force)
-                Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString "UserASecret" -AsPlainText -Force)))
+                SecureString = (ConvertTo-SecureString $randomSecretA -AsPlainText -Force)
+                Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString $randomSecretB -AsPlainText -Force)))
             }
             Add-Secret -Name __Test_Hashtable_ -Secret $ht -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
@@ -401,9 +406,9 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $err.Count | Should -Be 0
             $ht.Blob.Count | Should -Be 2
             $ht.Str | Should -BeExactly "Hello"
-            [System.Net.NetworkCredential]::new('', ($ht.SecureString)).Password | Should -BeExactly "SecureHello"
+            [System.Net.NetworkCredential]::new('', ($ht.SecureString)).Password | Should -BeExactly $randomSecretA
             $ht.Cred.UserName | Should -BeExactly "UserA"
-            [System.Net.NetworkCredential]::New('', ($ht.Cred.Password)).Password | Should -BeExactly "UserASecret"
+            [System.Net.NetworkCredential]::New('', ($ht.Cred.Password)).Password | Should -BeExactly $randomSecretB
         }
 
         It "Verifies Hashtable enumeration from local store" {
@@ -502,8 +507,10 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             [string] $VaultName
         )
 
+        $randomSecret = [System.IO.Path]::GetRandomFileName()
+
         It "Verifies writing SecureString type to $Title vault" {
-            Add-Secret -Name BinVaultSecureStr -Secret (ConvertTo-SecureString "BinVaultSecureStr" -AsPlainText -Force) `
+            Add-Secret -Name BinVaultSecureStr -Secret (ConvertTo-SecureString $randomSecret -AsPlainText -Force) `
                 -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
         }
@@ -511,7 +518,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         It "Verifies reading SecureString type from $Title vault" {
             $ss = Get-Secret -Name BinVaultSecureStr -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
-            [System.Net.NetworkCredential]::new('',$ss).Password | Should -BeExactly "BinVaultSecureStr"
+            [System.Net.NetworkCredential]::new('',$ss).Password | Should -BeExactly $randomSecret
         }
 
         It "Verifies enumerating SecureString type from $Title vault" {
@@ -537,8 +544,10 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             [string] $VaultName
         )
 
+        $randomSecret = [System.IO.Path]::GetRandomFileName()
+
         It "Verifies writing PSCredential to $Title vault" {
-            $cred = [pscredential]::new('UserName', (ConvertTo-SecureString "UserSecret" -AsPlainText -Force))
+            $cred = [pscredential]::new('UserName', (ConvertTo-SecureString $randomSecret -AsPlainText -Force))
             Add-Secret -Name BinVaultCred -Secret $cred -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
         }
@@ -547,7 +556,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $cred = Get-Secret -Name BinVaultCred -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
             $cred.UserName | Should -BeExactly "UserName"
-            [System.Net.NetworkCredential]::new('', ($cred.Password)).Password | Should -BeExactly "UserSecret"
+            [System.Net.NetworkCredential]::new('', ($cred.Password)).Password | Should -BeExactly $randomSecret
         }
 
         It "Verifies enumerating PSCredential type from $Title vault" {
@@ -573,12 +582,15 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             [string] $VaultName
         )
 
+        $randomSecretA = [System.IO.Path]::GetRandomFileName()
+        $randomSecretB = [System.IO.Path]::GetRandomFileName()
+
         It "Verifies writing Hashtable type to $Title vault" {
             $ht = @{ 
                 Blob = ([byte[]] @(1,2))
                 Str = "Hello"
-                SecureString = (ConvertTo-SecureString "SecureHello" -AsPlainText -Force)
-                Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString "UserASecret" -AsPlainText -Force)))
+                SecureString = (ConvertTo-SecureString $randomSecretA -AsPlainText -Force)
+                Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString $randomSecretB -AsPlainText -Force)))
             }
             Add-Secret -Name BinVaultHT -Vault $VaultName -Secret $ht -ErrorVariable err
             $err.Count | Should -Be 0
@@ -589,9 +601,9 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $err.Count | Should -Be 0
             $ht.Blob.Count | Should -Be 2
             $ht.Str | Should -BeExactly "Hello"
-            [System.Net.NetworkCredential]::new('', $ht.SecureString).Password | Should -BeExactly "SecureHello"
+            [System.Net.NetworkCredential]::new('', $ht.SecureString).Password | Should -BeExactly $randomSecretA
             $ht.Cred.UserName | Should -BeExactly "UserA"
-            [System.Net.NetworkCredential]::new('', $ht.Cred.Password).Password | Should -BeExactly "UserASecret"
+            [System.Net.NetworkCredential]::new('', $ht.Cred.Password).Password | Should -BeExactly $randomSecretB
         }
 
         It "Verifies enumerating Hashtable type from $Title vault" {

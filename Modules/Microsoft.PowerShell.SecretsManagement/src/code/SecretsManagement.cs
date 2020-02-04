@@ -172,7 +172,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                 ThrowTerminatingError(
                     new ErrorRecord(
-                        new PSInvalidOperationException(),
+                        new PSInvalidOperationException(msg),
                         "RegisterSecretsVaultCantGetModuleInfo",
                         ErrorCategory.InvalidOperation,
                         this));
