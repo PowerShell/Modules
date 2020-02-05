@@ -1,4 +1,7 @@
-﻿using Microsoft.PowerShell.SecretsManagement;
+﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
+using Microsoft.PowerShell.SecretsManagement;
 using System;
 using System.Collections;
 using System.Collections.Generic;

@@ -1,6 +1,5 @@
-##
-##
-##
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
 
 Write-Warning "Adding test module path"
 $pathExists = $false
