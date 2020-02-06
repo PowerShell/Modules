@@ -53,6 +53,7 @@ steps:
 - task: securedevelopmentteam.vss-secure-development-tools.build-task-credscan.CredScan@2
   displayName: 'Run CredScan'
   inputs:
+    toolMajorVersion: V2
     debugMode: false
   continueOnError: true
 
