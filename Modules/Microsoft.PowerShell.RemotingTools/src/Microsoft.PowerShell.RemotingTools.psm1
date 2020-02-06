@@ -217,14 +217,16 @@ function CheckPowerShellVersion
     $commandToExec = "& '$FilePath' -noprofile -noninteractive -c '`$PSVersionTable.PSVersion.Major'"
     $sb = [scriptblock]::Create($commandToExec)
 
-    $psVersionMajor = 0
     try
     {
         $psVersionMajor = [int] (& $sb) 2>$null
         Write-Verbose ""
         Write-Verbose "CheckPowerShellVersion: $psVersionMajor for FilePath: $FilePath"
     }
-    catch { }
+    catch
+    {
+        $psVersionMajor = 0
+    }
 
     if ($psVersionMajor -ge 6)
     {
@@ -383,7 +385,7 @@ function Enable-SSHRemoting
     else
     {
         # macOS
-        $SSHDFound = ((launchctl list | Select-String 'com.openssh.sshd') -ne $null)
+        $SSHDFound = ($null -ne (launchctl list | Select-String 'com.openssh.sshd'))
     }
     if (! $SSHDFound)
     {
