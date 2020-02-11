@@ -94,7 +94,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         internal const string ScriptParamTag = "_SPT_Parameters_";
         internal const string BuiltInLocalVault = "BuiltInLocalVault";
-        internal const string ImplementingModule = "ImplementingModule";
+        internal const string ImplementingModule = "SecretsManagementExtension";
 
         #endregion
 
@@ -262,7 +262,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             string dirPath,
             out Exception error)
         {
-            // An implementing module will be in a subfolder with module name 'ImplementingModule',
+            // An implementing module will be in a subfolder with module name 'SecretsManagementExtension',
             // and will export the four required functions: Add-Secret, Get-Secret, Remove-Secret, Get-SecretInfo.
             var implementingModulePath = System.IO.Path.Combine(dirPath, ImplementingModule);
             var moduleInfo = GetModuleInfo(implementingModulePath);

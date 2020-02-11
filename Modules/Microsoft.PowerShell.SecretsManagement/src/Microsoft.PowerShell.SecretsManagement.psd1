@@ -7,7 +7,7 @@
 RootModule = '.\Microsoft.PowerShell.SecretsManagement.dll'
 
 # Version number of this module.
-ModuleVersion = '0.1.0'
+ModuleVersion = '0.2.0'
 
 # Supported PSEditions
 CompatiblePSEditions = @('Core')
@@ -31,7 +31,15 @@ locally using a local vault provider, and access secrets from remote vaults.
 Local and remote vaults can be registered and unregistered on the local machine, per user,
 for use in managing and retrieving secrets.
 
-*** This is an alpha version of the module that currently works only on Windows platforms ***
+*****
+Breaking change for 0.2.0: Extension vault expected script module is renamed from 
+'ImplementingModule' to 'SecretsManagementExtension'.
+Any registered script extension vault module will have to be renamed accordingly.
+*****
+
+*****
+This is an alpha version of the module that currently works only on Windows platforms.
+*****
 "
 
 # Minimum version of the PowerShell engine required by this module
@@ -46,7 +54,6 @@ FunctionsToExport = @()
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = @(
     'Register-SecretsVault','Unregister-SecretsVault','Get-SecretsVault','Add-Secret','Remove-Secret','Get-Secret','Get-SecretInfo')
-#    'Add-LocalSecret','Get-LocalSecret','Remove-LocalSecret')
 
 # Variables to export from this module
 VariablesToExport = '*'

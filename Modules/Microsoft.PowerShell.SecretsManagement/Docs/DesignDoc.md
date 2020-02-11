@@ -129,20 +129,20 @@ When PowerShell loads the module, the required assembly will be loaded and the i
 
 ### PowerShell script implementation
 
-For a script implementation, the PowerShell module must include a subdirectory named 'ImplementingModule' in the same directory containing the module manifest file.
-The ImplementingModule subdirectory must contain PowerShell script module files named 'ImplementingModule' that implements the required script functions.  
+For a script implementation, the PowerShell module must include a subdirectory named 'SecretsManagementExtension' in the same directory containing the module manifest file.
+The SecretsManagementExtension subdirectory must contain PowerShell script module files named 'SecretsManagementExtension' that implements the required script functions.  
 
-ImplementingModule.psd1
+SecretsManagementExtension.psd1
 
 ```powershell
 @{
     ModuleVersion = '1.0'
-    RootModule = '.\ImplementingModule.psm1'
+    RootModule = '.\SecretsManagementExtension.psm1'
     FunctionsToExport = @('Set-Secret','Get-Secret','Remove-Secret','Get-SecretInfo')
 }
 ```
 
-ImplementingModule.psm1
+SecretsManagementExtension.psm1
 
 ```powershell
 function Set-Secret
