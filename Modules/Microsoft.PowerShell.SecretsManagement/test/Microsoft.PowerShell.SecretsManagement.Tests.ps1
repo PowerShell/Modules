@@ -227,7 +227,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         $script:scriptModuleFilePath = Join-Path $scriptModulePath "${scriptModuleName}.psd1"
         "@{ ModuleVersion = '1.0' }" | Out-File -FilePath $script:scriptModuleFilePath
 
-        $implementingModuleName = "ImplementingModule"
+        $implementingModuleName = "SecretsManagementExtension"
         $implementingModulePath = Join-Path $scriptModulePath $implementingModuleName
         New-Item -ItemType Directory $implementingModulePath -Force
         $implementingManifestFilePath = Join-Path $implementingModulePath "${implementingModuleName}.psd1"
