@@ -157,7 +157,7 @@ However, it should always implement secret retrieval (GetSecret, GetSecretInfo).
 If a vault extension doesn't support some functionality (such as add/remove a secret, or a particular secret type), then it should throw an exception with a meaningful error message.  
 
 Both of the binary and script modules implement the four functions in similar ways.
-The method/functions take the same parameters, including optional additional parameters, and return the same object(s).  
+The method/functions take the same parameters, including optional additional parameters, and return the same object(s).
 
 - Get-Secret  
 Input Parameters: Name, AdditionalParameters  
