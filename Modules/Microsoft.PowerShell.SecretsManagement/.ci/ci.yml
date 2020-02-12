@@ -46,6 +46,15 @@ stages:
       condition: succeededOrFailed()
 
     - pwsh: |
+        dir $env:USERPROFILE\Documents\PowerShell\Modules\* -Directory -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -Verbose -ErrorAction SilentlyContinue
+      displayName: Clean PowerShell modules directory
+
+    - pwsh: |
+        Get-Module -Name PowerShellGet -ListAvailable
+        Import-Module -Name PowerShellGet
+      displayName: Import PowerShellGet Module
+
+    - pwsh: |
         Install-Module -Name "platyPS","Pester" -Force
       displayName: Install dependencies
     - pwsh: |

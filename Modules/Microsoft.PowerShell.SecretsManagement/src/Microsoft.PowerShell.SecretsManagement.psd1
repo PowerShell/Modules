@@ -32,7 +32,7 @@ Local and remote vaults can be registered and unregistered on the local machine,
 for use in managing and retrieving secrets.
 
 *****
-Breaking change for 0.2.0: Extension vault expected script module is renamed from 
+Breaking change for 0.2.0: The script extension vault module name has been changed from 
 'ImplementingModule' to 'SecretsManagementExtension'.
 Any registered script extension vault module will have to be renamed accordingly.
 *****
