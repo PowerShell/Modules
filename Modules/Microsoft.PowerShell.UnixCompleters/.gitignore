@@ -1,0 +1,5 @@
+out/
+bin/
+obj/
+*.dll
+*.pdb
