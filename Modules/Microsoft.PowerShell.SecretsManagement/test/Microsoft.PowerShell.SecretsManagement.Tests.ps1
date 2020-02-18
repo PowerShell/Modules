@@ -261,7 +261,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         $bytesToWrite = [System.Text.Encoding]::UTF8.GetBytes("Hello!!!")
 
         It "Verifies byte[] write to local store" {
-            Add-Secret -Name __Test_ByteArray_ -Secret $bytesToWrite -Vault BuiltInLocalVault -ErrorVariable err
+            Set-Secret -Name __Test_ByteArray_ -Secret $bytesToWrite -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -272,7 +272,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         }
 
         It "Verifes byte[] clobber error in local store" {
-            { Add-Secret -Name __Test_ByteArray_ -Secret $bytesToWrite -Vault BuiltInLocalVault -NoClobber } | Should -Throw -ErrorId "AddSecretAlreadyExists"
+            { Set-Secret -Name __Test_ByteArray_ -Secret $bytesToWrite -Vault BuiltInLocalVault -NoClobber } | Should -Throw -ErrorId "AddSecretAlreadyExists"
         }
 
         It "Verifies byte[] enumeration from local store" {
@@ -293,7 +293,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
     Context "Built-in local store String type" {
 
         It "Verifes string write to local store" {
-            Add-Secret -Name __Test_String_ -Secret "Hello!!Secret" -Vault BuiltInLocalVault -ErrorVariable err
+            Set-Secret -Name __Test_String_ -Secret "Hello!!Secret" -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -328,7 +328,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         $secureStringToWrite = ConvertTo-SecureString -String $randomSecret -AsPlainText -Force
 
         It "Verifies SecureString write to local store" {
-            Add-Secret -Name __Test_SecureString_ -Secret $secureStringToWrite -Vault BuiltInLocalVault -ErrorVariable err
+            Set-Secret -Name __Test_SecureString_ -Secret $secureStringToWrite -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -352,6 +352,22 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             { Get-Secret -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorAction Stop } | Should -Throw `
                 -ErrorId 'GetSecretNotFound,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
         }
+
+        It "Verifies SecureString write with alternate parameter set" {
+            Set-Secret -Name __Test_SecureStringA_ -SecureStringSecret $secureStringToWrite -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies SecureString read from alternate parameter set" {
+            $ssRead = Get-Secret -Name __Test_SecureStringA_ -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            [System.Net.NetworkCredential]::new('',$ssRead).Password | Should -BeExactly $randomSecret
+        }
+
+        It "Verifes SecureString remove from alternate parameter set" {
+            { Remove-Secret -Name __Test_SecureStringA_ -Vault BuiltInLocalVault -ErrorVariable err } | Should -Not -Throw
+            $err.Count | Should -Be 0
+        }
     }
 
     Context "Built-in local store PSCredential type" {
@@ -360,7 +376,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         It "Verifies PSCredential type write to local store" {
             $cred = [pscredential]::new('UserL', (ConvertTo-SecureString $randomSecret -AsPlainText -Force))
-            Add-Secret -Name __Test_PSCredential_ -Secret $cred -Vault BuiltInLocalVault -ErrorVariable err
+            Set-Secret -Name __Test_PSCredential_ -Secret $cred -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -397,7 +413,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                 SecureString = (ConvertTo-SecureString $randomSecretA -AsPlainText -Force)
                 Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString $randomSecretB -AsPlainText -Force)))
             }
-            Add-Secret -Name __Test_Hashtable_ -Secret $ht -Vault BuiltInLocalVault -ErrorVariable err
+            Set-Secret -Name __Test_Hashtable_ -Secret $ht -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -436,7 +452,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         It "Verifies writing byte[] type to $Title vault" {
             $bytes = [System.Text.Encoding]::UTF8.GetBytes("BinVaultHelloStr")
-            Add-Secret -Name BinVaultBlob -Secret $bytes -Vault $VaultName -ErrorVariable err
+            Set-Secret -Name BinVaultBlob -Secret $bytes -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -470,7 +486,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         )
 
         It "Verifies writing string type to $Title vault" {
-            Add-Secret -Name BinVaultStr -Secret "HelloBinVault" -Vault $VaultName -ErrorVariable err
+            Set-Secret -Name BinVaultStr -Secret "HelloBinVault" -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -508,9 +524,10 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         )
 
         $randomSecret = [System.IO.Path]::GetRandomFileName()
+        $secureStringToWrite = ConvertTo-SecureString $randomSecret -AsPlainText -Force
 
         It "Verifies writing SecureString type to $Title vault" {
-            Add-Secret -Name BinVaultSecureStr -Secret (ConvertTo-SecureString $randomSecret -AsPlainText -Force) `
+            Set-Secret -Name BinVaultSecureStr -Secret $secureStringToWrite `
                 -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
         }
@@ -535,6 +552,23 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             { Get-Secret -Name BinVaultSecureStr -Vault $VaultName -ErrorAction Stop } | Should -Throw `
                 -ErrorId 'InvokeGetSecretError,Microsoft.PowerShell.SecretsManagement.GetSecretCommand'
         }
+
+        It "Verifies SecureString write with alternate parameter set" {
+            Set-Secret -Name BinVaultSecureStrA -SecureStringSecret $secureStringToWrite `
+                -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+        }
+
+        It "Verifies SecureString read from alternate parameter set" {
+            $ssRead = Get-Secret -Name BinVaultSecureStrA -Vault BuiltInLocalVault -ErrorVariable err
+            $err.Count | Should -Be 0
+            [System.Net.NetworkCredential]::new('',$ssRead).Password | Should -BeExactly $randomSecret
+        }
+
+        It "Verifes SecureString remove from alternate parameter set" {
+            { Remove-Secret -Name BinVaultSecureStrA -Vault BuiltInLocalVault -ErrorVariable err } | Should -Not -Throw
+            $err.Count | Should -Be 0
+        }
     }
 
     function VerifyPSCredentialType
@@ -548,7 +582,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         It "Verifies writing PSCredential to $Title vault" {
             $cred = [pscredential]::new('UserName', (ConvertTo-SecureString $randomSecret -AsPlainText -Force))
-            Add-Secret -Name BinVaultCred -Secret $cred -Vault $VaultName -ErrorVariable err
+            Set-Secret -Name BinVaultCred -Secret $cred -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
@@ -592,7 +626,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                 SecureString = (ConvertTo-SecureString $randomSecretA -AsPlainText -Force)
                 Cred = ([pscredential]::New("UserA", (ConvertTo-SecureString $randomSecretB -AsPlainText -Force)))
             }
-            Add-Secret -Name BinVaultHT -Vault $VaultName -Secret $ht -ErrorVariable err
+            Set-Secret -Name BinVaultHT -Vault $VaultName -Secret $ht -ErrorVariable err
             $err.Count | Should -Be 0
         }
 
