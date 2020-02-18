@@ -263,7 +263,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             out Exception error)
         {
             // An implementing module will be in a subfolder with module name 'SecretsManagementExtension',
-            // and will export the four required functions: Add-Secret, Get-Secret, Remove-Secret, Get-SecretInfo.
+            // and will export the four required functions: Set-Secret, Get-Secret, Remove-Secret, Get-SecretInfo.
             var implementingModulePath = System.IO.Path.Combine(dirPath, ImplementingModule);
             var moduleInfo = GetModuleInfo(implementingModulePath);
             if (moduleInfo == null)
@@ -980,15 +980,23 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Add-Secret
+    #region Set-Secret
 
     /// <summary>
     /// Adds a provided secret to the specified extension vault, 
     /// or the built-in default store if an extension vault is not specified.
     /// </summary>
-    [Cmdlet(VerbsCommon.Add, "Secret")]
-    public sealed class AddSecretCommand : SecretsCmdlet
+    [Cmdlet(VerbsCommon.Set, "Secret", 
+            DefaultParameterSetName = SecureStringParameterSet)]
+    public sealed class SetSecretCommand : SecretsCmdlet
     {
+        #region Members
+
+        private const string SecureStringParameterSet = "SecureStringParameterSet";
+        private const string ObjectParameterSet = "ObjectParameterSet";
+
+        #endregion
+
         #region Parameters
 
         /// <summary>
@@ -1007,8 +1015,16 @@ namespace Microsoft.PowerShell.SecretsManagement
         ///     Hashtable
         ///     byte[]
         /// </summary>
-        [Parameter(Position=1, Mandatory=true, ValueFromPipeline=true)]
+        [Parameter(Position=1, Mandatory=true, ValueFromPipeline=true,
+                   ParameterSetName = ObjectParameterSet)]
         public object Secret { get; set; }
+
+        /// <summary>
+        /// Gets or sets a SecureString value to be added to a vault.
+        /// </summary>
+        [Parameter(Position=1, Mandatory=true, ValueFromPipeline=true,
+                   ParameterSetName = SecureStringParameterSet)]
+        public SecureString SecureStringSecret { get; set; }
 
         /// <summary>
         /// Gets or sets an optional extension vault name.
@@ -1028,6 +1044,11 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         protected override void EndProcessing()
         {
+            if (ParameterSetName == SecureStringParameterSet)
+            {
+                Secret = SecureStringSecret;
+            }
+
             var secretToWrite = (Secret is PSObject psObject) ? psObject.BaseObject : Secret;
 
             // Add to specified vault.
