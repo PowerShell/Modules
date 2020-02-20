@@ -5,6 +5,6 @@ namespace Microsoft.PowerShell.UnixCompleters.Commands
 {
     internal static class Utils
     {
-        public const string ModulePrefix = "PSUnixUtil";
+        public const string ModulePrefix = "UnixCompleter";
     }
 }

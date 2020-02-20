@@ -7,7 +7,7 @@ using System.Management.Automation;
 
 namespace Microsoft.PowerShell.UnixCompleters.Commands
 {
-    [Cmdlet(VerbsData.Import, Utils.ModulePrefix + "Completers")]
+    [Cmdlet(VerbsData.Import, Utils.ModulePrefix + "s")]
     public class ImportPSUnixUtilCompletersCommand : PSCmdlet
     {
         protected override void EndProcessing()
