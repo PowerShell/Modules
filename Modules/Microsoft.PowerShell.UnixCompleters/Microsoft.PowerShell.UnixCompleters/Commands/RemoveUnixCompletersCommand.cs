@@ -6,8 +6,8 @@ using System.Management.Automation;
 
 namespace Microsoft.PowerShell.UnixCompleters.Commands
 {
-    [Cmdlet(VerbsCommon.Remove, Utils.ModulePrefix + "Completers")]
-    public class RemovePSUnixUtilCompletersCommand : PSCmdlet
+    [Cmdlet(VerbsCommon.Remove, Utils.ModulePrefix + "s")]
+    public class RemoveUnixCompletersCommand : PSCmdlet
     {
         protected override void EndProcessing()
         {

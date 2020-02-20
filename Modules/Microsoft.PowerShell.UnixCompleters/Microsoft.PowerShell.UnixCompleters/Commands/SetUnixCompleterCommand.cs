@@ -6,8 +6,8 @@ using System.Management.Automation;
 
 namespace Microsoft.PowerShell.UnixCompleters.Commands
 {
-    [Cmdlet(VerbsCommon.Set, Utils.ModulePrefix + "Completer")]
-    public class SetPSUnixUtilCompletersCompleterCommand : Cmdlet
+    [Cmdlet(VerbsCommon.Set, Utils.ModulePrefix)]
+    public class SetUnixCompleterCommand : Cmdlet
     {
         [ValidateNotNull()]
         [Parameter(Position = 0, Mandatory = true, ParameterSetName = "Completer")]
