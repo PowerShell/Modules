@@ -226,7 +226,6 @@ namespace Microsoft.PowerShell.UnixCompleters
             string replacementWord = null)
         {
             // Build a bash array of line components, like "('ls' '-a')"
-
             string[] lineElements = line.Split();
 
             int approximateLength = 0;
