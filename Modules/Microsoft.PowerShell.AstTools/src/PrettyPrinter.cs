@@ -28,7 +28,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public PrettyPrinter()
         {
             _sb = new StringBuilder();
-            _newline = Environment.NewLine;
+            _newline = "\n";
             _indentStr = "    ";
             _comma = ", ";
             _indent = 0;
@@ -119,16 +119,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitBreakStatement(BreakStatementAst breakStatementAst)
         {
-            _sb.Append("break");
-
-            if (breakStatementAst.Label != null)
-            {
-                _sb.Append(' ');
-                breakStatementAst.Label.Visit(this);
-            }
-
-            Newline();
-
+            WriteControlFlowStatement("break", breakStatementAst.Label);
             return AstVisitAction.SkipChildren;
         }
 
@@ -194,14 +185,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitContinueStatement(ContinueStatementAst continueStatementAst)
         {
-            _sb.Append("continue");
-
-            if (continueStatementAst.Label != null)
-            {
-                _sb.Append(' ');
-                continueStatementAst.Label.Visit(this);
-            }
-
+            WriteControlFlowStatement("continue", continueStatementAst.Label);
             return AstVisitAction.SkipChildren;
         }
 
@@ -258,16 +242,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitExitStatement(ExitStatementAst exitStatementAst)
         {
-            _sb.Append("exit");
-
-            if (exitStatementAst.Pipeline != null)
-            {
-                _sb.Append(' ');
-                exitStatementAst.Pipeline.Visit(this);
-            }
-
-            EndStatement();
-
+            WriteControlFlowStatement("exit", exitStatementAst.Pipeline);
             return AstVisitAction.SkipChildren;
         }
 
@@ -522,14 +497,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitReturnStatement(ReturnStatementAst returnStatementAst)
         {
-            _sb.Append("return");
-
-            if (returnStatementAst.Pipeline != null)
-            {
-                _sb.Append(' ');
-                returnStatementAst.Pipeline.Visit(this);
-            }
-
+            WriteControlFlowStatement("return", returnStatementAst.Pipeline);
             return AstVisitAction.SkipChildren;
         }
 
@@ -627,7 +595,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitSubExpression(SubExpressionAst subExpressionAst)
         {
             _sb.Append("$(");
-            subExpressionAst.SubExpression.Visit(this);
+            WriteStatementBlock(subExpressionAst.SubExpression.Statements, subExpressionAst.SubExpression.Traps);
             _sb.Append(')');
             return AstVisitAction.SkipChildren;
         }
@@ -651,13 +619,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitThrowStatement(ThrowStatementAst throwStatementAst)
         {
-            _sb.Append("throw");
-
-            if (throwStatementAst.Pipeline != null)
-            {
-                _sb.Append(' ');
-                throwStatementAst.Pipeline.Visit(this);
-            }
+            WriteControlFlowStatement("throw", throwStatementAst.Pipeline);
 
             return AstVisitAction.SkipChildren;
         }
@@ -737,6 +699,17 @@ namespace Microsoft.PowerShell.PrettyPrinter
             whileStatementAst.Body.Visit(this);
 
             return AstVisitAction.SkipChildren;
+        }
+
+        private void WriteControlFlowStatement(string keyword, Ast childAst)
+        {
+            _sb.Append(keyword);
+
+            if (childAst != null)
+            {
+                _sb.Append(' ');
+                childAst.Visit(this);
+            }
         }
 
         private void WriteTypeName(ITypeName typeName)
@@ -856,21 +829,29 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private void WriteStatementBlock(IReadOnlyList<StatementAst> statements, IReadOnlyList<TrapStatementAst> traps = null)
         {
-            if (traps != null)
+            bool wroteTrap = false;
+            if (traps != null && traps.Count > 0)
             {
+                wroteTrap = true;
                 foreach (TrapStatementAst trap in traps)
                 {
                     trap.Visit(this);
                 }
             }
 
-            foreach (StatementAst statement in statements)
+            if (statements != null && statements.Count > 0)
             {
-                statement.Visit(this);
-
-                if (statement is PipelineBaseAst)
+                if (wroteTrap)
                 {
                     Newline();
+                }
+
+                statements[0].Visit(this);
+
+                for (int i = 1; i < statements.Count; i++)
+                {
+                    Newline();
+                    statements[i].Visit(this);
                 }
             }
         }
@@ -908,12 +889,6 @@ namespace Microsoft.PowerShell.PrettyPrinter
         private void EndStatement()
         {
             _sb.Append(_newline);
-            _sb.Append(_newline);
-
-            for (int i = 0; i < _indent; i++)
-            {
-                _sb.Append(_indentStr);
-            }
         }
 
         private void Indent()
@@ -937,7 +912,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             asts[0].Visit(this);
 
-            for (int i = 1; i < asts.Count - 1; i++)
+            for (int i = 1; i < asts.Count; i++)
             {
                 _sb.Append(separator);
                 asts[i].Visit(this);
