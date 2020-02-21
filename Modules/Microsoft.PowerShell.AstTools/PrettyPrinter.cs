@@ -8,6 +8,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
 {
     public class PrettyPrinter : AstVisitor2
     {
+        public static string PrettyPrint(Ast ast)
+        {
+            var pp = new PrettyPrinter();
+            ast.Visit(pp);
+            return pp.GetPrettyPrintResult();
+        }
+
         private readonly StringBuilder _sb;
 
         private readonly string _newline;
@@ -32,7 +39,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
             _sb.Clear();
         }
 
-        public string GetString()
+        public string GetPrettyPrintResult()
         {
             return _sb.ToString();
         }
@@ -530,7 +537,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             _sb.Append('{');
             Indent();
-            scriptBlockAst.ParamBlock.Visit(this);
+            if (scriptBlockAst.ParamBlock != null)
+            {
+                scriptBlockAst.ParamBlock.Visit(this);
+            }
 
             bool useExplicitEndBlock = false;
 
@@ -857,6 +867,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
             foreach (StatementAst statement in statements)
             {
                 statement.Visit(this);
+
+                if (statement is PipelineBaseAst)
+                {
+                    Newline();
+                }
             }
         }
 
