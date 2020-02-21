@@ -48,7 +48,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             _sb.Append("@(");
 
-            arrayExpressionAst.SubExpression.Visit(this);
+            WriteStatementBlock(arrayExpressionAst.SubExpression.Statements, arrayExpressionAst.SubExpression.Traps);
 
             _sb.Append(")");
 
