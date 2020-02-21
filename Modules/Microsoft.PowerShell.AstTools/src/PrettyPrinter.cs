@@ -137,6 +137,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             Intersperse(commandAst.CommandElements, " ");
 
+            if (commandAst.Redirections != null)
+            {
+                Intersperse(commandAst.Redirections, " ");
+            }
+
             return AstVisitAction.SkipChildren;
         }
 
@@ -254,7 +259,42 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitFileRedirection(FileRedirectionAst redirectionAst)
         {
-            throw new NotImplementedException();
+            _sb.Append(GetStreamIndicator(redirectionAst.FromStream))
+                .Append('>');
+
+            redirectionAst.Location.Visit(this);
+
+            return AstVisitAction.SkipChildren;
+        }
+
+        private char GetStreamIndicator(RedirectionStream stream)
+        {
+            switch (stream)
+            {
+                case RedirectionStream.All:
+                    return '*';
+
+                case RedirectionStream.Debug:
+                    return '5';
+
+                case RedirectionStream.Error:
+                    return '2';
+
+                case RedirectionStream.Information:
+                    return '6';
+
+                case RedirectionStream.Output:
+                    return '1';
+
+                case RedirectionStream.Verbose:
+                    return '4';
+
+                case RedirectionStream.Warning:
+                    return '3';
+
+                default:
+                    throw new ArgumentException($"Unknown redirection stream: '{stream}'");
+            }
         }
 
         public override AstVisitAction VisitForEachStatement(ForEachStatementAst forEachStatementAst)
@@ -329,26 +369,23 @@ namespace Microsoft.PowerShell.PrettyPrinter
             _sb.Append("if (");
             ifStmtAst.Clauses[0].Item1.Visit(this);
             _sb.Append(')');
-            Newline();
             ifStmtAst.Clauses[0].Item2.Visit(this);
 
             for (int i = 1; i < ifStmtAst.Clauses.Count; i++)
             {
+                Newline();
                 _sb.Append("elseif (");
                 ifStmtAst.Clauses[i].Item1.Visit(this);
                 _sb.Append(')');
-                Newline();
                 ifStmtAst.Clauses[i].Item2.Visit(this);
             }
 
             if (ifStmtAst.ElseClause != null)
             {
-                _sb.Append("else");
                 Newline();
+                _sb.Append("else");
                 ifStmtAst.ElseClause.Visit(this);
             }
-
-            EndStatement();
 
             return AstVisitAction.SkipChildren;
         }
@@ -477,6 +514,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitPipeline(PipelineAst pipelineAst)
         {
             Intersperse(pipelineAst.PipelineElements, " | ");
+#if PS7
+            if (pipelineAst.Background)
+            {
+                _sb.Append(" &");
+            }
+#endif
             return AstVisitAction.SkipChildren;
         }
 
@@ -486,6 +529,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
             statementChain.LhsPipelineChain.Visit(this);
             _sb.Append(' ').Append(GetTokenString(statementChain.Operator)).Append(' ');
             statementChain.RhsPipeline.Visit(this);
+            if (statementChain.Background)
+            {
+                _sb.Append(" &");
+            }
             return AstVisitAction.SkipChildren;
         }
 #endif
@@ -532,7 +579,6 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 scriptBlockAst.ProcessBlock.Visit(this);
             }
 
-            Newline();
             if (useExplicitEndBlock)
             {
                 scriptBlockAst.EndBlock.Visit(this);

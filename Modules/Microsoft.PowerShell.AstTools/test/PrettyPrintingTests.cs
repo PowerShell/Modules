@@ -14,6 +14,11 @@ namespace test
         [InlineData("-1")]
         [InlineData("$x + $y")]
         [InlineData("Get-ChildItem")]
+        [InlineData("gci >test.txt")]
+        [InlineData("gci 1>test.txt")]
+        [InlineData("gci 1>test.txt 2>errs.txt")]
+        [InlineData("gci 2>&1")]
+        [InlineData("Invoke-Expression 'runCommand' &")]
         [InlineData("Get-ChildItem -Recurse -Path ./here")]
         [InlineData("Get-ChildItem -Recurse -Path \"$PWD\\there\"")]
         [InlineData("exit 1")]
@@ -47,11 +52,120 @@ namespace test
         [InlineData(@"""I`e[31mlike`e[0mducks""")]
         [InlineData("1 && 2")]
         [InlineData("sudo apt update && sudo apt upgrade")]
+        [InlineData("firstthing && secondthing &")]
         [InlineData("Get-Item ./thing || $(throw 'Bad')")]
+        [InlineData(@"$true ? 'true' : 'false'")]
 #endif
         public void TestPrettyPrintingIdempotentForSimpleStatements(string input)
         {
-            AssertPrettyPrintingIdentical(input);
+            AssertPrettyPrintedStatementIdentical(input);
+        }
+
+        [Fact]
+        public void TestScriptBlock()
+        {
+            string script = @"
+{
+    $args[0] + 2
+}
+";
+
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestScriptBlockInvocation()
+        {
+            string script = @"
+& {
+    $args[0] + 2
+}
+";
+
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestScriptBlockDotSource()
+        {
+            string script = @"
+. {
+    $args[0] + 2
+}
+";
+
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestScriptBlockEmptyParams()
+        {
+            string script = @"
+{
+    param()
+}
+";
+
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestScriptBlockParams()
+        {
+            string script = @"
+{
+    param(
+        $String,
+
+        $Switch
+    )
+}
+";
+
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestScriptBlockAttributedParams()
+        {
+            string script = @"
+{
+    param(
+        [Parameter()]
+        [string]
+        $String,
+
+        [Parameter()]
+        [switch]
+        $Switch
+    )
+}
+";
+
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestScriptBlockParamAttributesWithArguments()
+        {
+            string script = @"
+{
+    param(
+        [Parameter(Mandatory)]
+        [string]
+        $String,
+
+        [Parameter(Mandatory = $true)]
+        [AnotherAttribute(1, 2)]
+        [ThirdAttribute(1, 2, Fun = $true)]
+        [ThirdAttribute(1, 2, Fun)]
+        [switch]
+        $Switch
+    )
+}
+";
+
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -66,20 +180,20 @@ while ($i -lt 10)
 Write-Host ""`$i = $i""
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
         public void TestForeachLoop()
         {
             string script = @"
-foreach ($n in 1,2,3)
+foreach ($n in 1, 2, 3)
 {
     Write-Output ($n + 1)
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -92,7 +206,7 @@ for ($i = 0; $i -lt $args.Count; $i++)
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -120,7 +234,7 @@ switch ($x)
     }
 }
 ";
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -134,7 +248,7 @@ do
 } while ($x -lt 10)
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -148,7 +262,7 @@ do
 } until ($x -eq 10)
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -161,7 +275,7 @@ if ($x)
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -178,7 +292,7 @@ elseif ($y)
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -195,7 +309,7 @@ else
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -216,7 +330,7 @@ else
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -233,7 +347,7 @@ catch
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -250,7 +364,7 @@ catch [System.Exception]
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -267,7 +381,7 @@ finally
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -288,7 +402,7 @@ finally
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -300,7 +414,7 @@ class Duck
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -313,7 +427,7 @@ class Duck
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -329,7 +443,7 @@ class Duck
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
         [Fact]
@@ -345,7 +459,7 @@ class Duck
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
 
 
@@ -361,13 +475,19 @@ class Duck : object
 }
 ";
 
-            AssertPrettyPrintingIdentical(script);
+            AssertPrettyPrintedStatementIdentical(script);
         }
-        public void AssertPrettyPrintingIdentical(string input)
+
+        private void AssertPrettyPrintedStatementIdentical(string input)
         {
             Ast ast = Parser.ParseInput(input, out Token[] _, out ParseError[] _);
             StatementAst statementAst = ((ScriptBlockAst)ast).EndBlock.Statements[0];
-            Assert.Equal(input, PrettyPrinter.PrettyPrint(statementAst));
+            Assert.Equal(NormalizeScriptInput(input), PrettyPrinter.PrettyPrint(statementAst));
+        }
+
+        private static string NormalizeScriptInput(string input)
+        {
+            return input.Trim().Replace(Environment.NewLine, "\n");
         }
     }
 }
