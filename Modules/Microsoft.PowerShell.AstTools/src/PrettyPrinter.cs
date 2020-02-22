@@ -107,7 +107,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitBaseCtorInvokeMemberExpression(BaseCtorInvokeMemberExpressionAst baseCtorInvokeMemberExpressionAst)
         {
-            throw new NotImplementedException();
+            _sb.Append("base(");
+            Intersperse(baseCtorInvokeMemberExpressionAst.Arguments, ", ");
+            _sb.Append(')');
+            return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitBinaryExpression(BinaryExpressionAst binaryExpressionAst)
