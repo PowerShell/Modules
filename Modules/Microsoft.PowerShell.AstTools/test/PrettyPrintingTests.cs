@@ -12,13 +12,21 @@ namespace test
         [InlineData("- $x")]
         [InlineData("- 1")]
         [InlineData("-1")]
+        [InlineData("$x++")]
+        [InlineData("$i--")]
+        [InlineData("--$i")]
+        [InlineData("++$i")]
+        [InlineData("- --$i")]
+        [InlineData("-not $true")]
         [InlineData("$x + $y")]
+        [InlineData("'{0}' -f 'Hi'")]
+        [InlineData("'1,2,3' -split ','")]
+        [InlineData("1, 2, 3 -join ' '")]
         [InlineData("Get-ChildItem")]
         [InlineData("gci >test.txt")]
-        [InlineData("gci 1>test.txt")]
-        [InlineData("gci 1>test.txt 2>errs.txt")]
+        [InlineData("gci >test.txt")]
+        [InlineData("gci >test.txt 2>errs.txt")]
         [InlineData("gci 2>&1")]
-        [InlineData("Invoke-Expression 'runCommand' &")]
         [InlineData("Get-ChildItem -Recurse -Path ./here")]
         [InlineData("Get-ChildItem -Recurse -Path \"$PWD\\there\"")]
         [InlineData("exit 1")]
@@ -49,6 +57,7 @@ namespace test
         [InlineData(@"1, 'Hi', 3")]
         [InlineData(@"@(1, 'Hi', 3)")]
 #if PS7
+        [InlineData("Invoke-Expression 'runCommand' &")]
         [InlineData(@"""I`e[31mlike`e[0mducks""")]
         [InlineData("1 && 2")]
         [InlineData("sudo apt update && sudo apt upgrade")]
@@ -62,13 +71,81 @@ namespace test
         }
 
         [Fact]
+        public void TestEmptyHashtable()
+        {
+            string script = "@{}";
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestSimpleHashtable()
+        {
+            string script = @"
+@{
+    One = 'One'
+    Two = $x
+    $banana = 7
+}
+";
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestComplexHashtable()
+        {
+            string script = @"
+@{
+    One = @{
+        SubOne = 1
+        SubTwo = {
+            $x
+        }
+    }
+    Two = $x
+    $banana = @(7, 3, 4)
+}
+";
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestFunction()
+        {
+            string script = @"
+function Test-Function
+{
+    Write-Host 'Hello!'
+}
+";
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestAdvancedFunction()
+        {
+            string script = @"
+function Test-Greeting
+{
+    [CmdletBinding()]
+    param(
+        [Parameter()]
+        [string]
+        $Greeting
+    )
+
+    Write-Host $Greeting
+}
+";
+            AssertPrettyPrintedStatementIdentical(script);
+        }
+
+        [Fact]
         public void TestScriptBlock()
         {
             string script = @"
 {
     $args[0] + 2
-}
-";
+}";
 
             AssertPrettyPrintedStatementIdentical(script);
         }
@@ -79,8 +156,7 @@ namespace test
             string script = @"
 & {
     $args[0] + 2
-}
-";
+}";
 
             AssertPrettyPrintedStatementIdentical(script);
         }
@@ -91,8 +167,7 @@ namespace test
             string script = @"
 . {
     $args[0] + 2
-}
-";
+}";
 
             AssertPrettyPrintedStatementIdentical(script);
         }
@@ -103,8 +178,7 @@ namespace test
             string script = @"
 {
     param()
-}
-";
+}";
 
             AssertPrettyPrintedStatementIdentical(script);
         }
@@ -119,8 +193,7 @@ namespace test
 
         $Switch
     )
-}
-";
+}";
 
             AssertPrettyPrintedStatementIdentical(script);
         }
@@ -139,8 +212,7 @@ namespace test
         [switch]
         $Switch
     )
-}
-";
+}";
 
             AssertPrettyPrintedStatementIdentical(script);
         }
@@ -162,8 +234,7 @@ namespace test
         [switch]
         $Switch
     )
-}
-";
+}";
 
             AssertPrettyPrintedStatementIdentical(script);
         }
@@ -172,12 +243,10 @@ namespace test
         public void TestWhileLoop()
         {
             string script = @"
-$i = 0
 while ($i -lt 10)
 {
     $i++
 }
-Write-Host ""`$i = $i""
 ";
 
             AssertPrettyPrintedStatementIdentical(script);
@@ -241,7 +310,6 @@ switch ($x)
         public void TestDoWhileLoop()
         {
             string script = @"
-$x = 0
 do
 {
     $x++
@@ -255,7 +323,6 @@ do
         public void TestDoUntilLoop()
         {
             string script = @"
-$x = 0
 do
 {
     $x++
@@ -482,10 +549,10 @@ class Duck : object
         {
             Ast ast = Parser.ParseInput(input, out Token[] _, out ParseError[] _);
             StatementAst statementAst = ((ScriptBlockAst)ast).EndBlock.Statements[0];
-            Assert.Equal(NormalizeScriptInput(input), PrettyPrinter.PrettyPrint(statementAst));
+            Assert.Equal(NormalizeScript(input), NormalizeScript(PrettyPrinter.PrettyPrint(statementAst)));
         }
 
-        private static string NormalizeScriptInput(string input)
+        private static string NormalizeScript(string input)
         {
             return input.Trim().Replace(Environment.NewLine, "\n");
         }
