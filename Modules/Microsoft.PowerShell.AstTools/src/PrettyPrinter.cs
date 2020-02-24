@@ -474,8 +474,6 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 ifStmtAst.ElseClause.Visit(this);
             }
 
-            EndStatement();
-
             return AstVisitAction.SkipChildren;
         }
 
@@ -533,7 +531,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             if (!namedBlockAst.Unnamed)
             {
-                _sb.Append(GetTokenString(namedBlockAst.BlockKind)).Append(' ');
+                _sb.Append(GetTokenString(namedBlockAst.BlockKind));
             }
 
             BeginBlock();
@@ -674,8 +672,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitScriptBlock(ScriptBlockAst scriptBlockAst)
         {
-            _sb.Append('{');
-            Indent();
+            if (scriptBlockAst.Parent != null)
+            {
+                _sb.Append('{');
+                Indent();
+            }
+
             bool needNewline = false;
             if (scriptBlockAst.ParamBlock != null)
             {
@@ -736,8 +738,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 }
             }
 
-            Dedent();
-            _sb.Append('}');
+            if (scriptBlockAst.Parent != null)
+            {
+                Dedent();
+                _sb.Append('}');
+            }
+
             return AstVisitAction.SkipChildren;
         }
 
@@ -827,11 +833,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 if (hasCases)
                 {
-                    Newline();
+                    Newline(count: 2);
                 }
 
                 _sb.Append("default");
-                Newline();
                 switchStatementAst.Default.Visit(this);
             }
 
@@ -1086,7 +1091,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitVariableExpression(VariableExpressionAst variableExpressionAst)
         {
-            _sb.Append('$').Append(variableExpressionAst.VariablePath.UserPath);
+            _sb.Append(variableExpressionAst.Splatted ? '@' : '$').Append(variableExpressionAst.VariablePath.UserPath);
             return AstVisitAction.SkipChildren;
         }
 
@@ -1277,11 +1282,17 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 }
 
                 statements[0].Visit(this);
+                StatementAst previousStatement = statements[0];
 
                 for (int i = 1; i < statements.Count; i++)
                 {
+                    if (IsBlockStatement(previousStatement))
+                    {
+                        _sb.Append(_newline);
+                    }
                     Newline();
                     statements[i].Visit(this);
+                    previousStatement = statements[i];
                 }
             }
         }
@@ -1356,6 +1367,23 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 _sb.Append(separator);
                 asts[i].Visit(this);
+            }
+        }
+
+        private bool IsBlockStatement(StatementAst statementAst)
+        {
+            switch (statementAst)
+            {
+                case PipelineBaseAst _:
+                case ReturnStatementAst _:
+                case ThrowStatementAst _:
+                case ExitStatementAst _:
+                case BreakStatementAst _:
+                case ContinueStatementAst _:
+                    return false;
+
+                default:
+                    return true;
             }
         }
 
