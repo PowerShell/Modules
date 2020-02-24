@@ -24,7 +24,6 @@ namespace test
         [InlineData("1, 2, 3 -join ' '")]
         [InlineData("Get-ChildItem")]
         [InlineData("gci >test.txt")]
-        [InlineData("gci >test.txt")]
         [InlineData("gci >test.txt 2>errs.txt")]
         [InlineData("gci 2>&1")]
         [InlineData("Get-ChildItem -Recurse -Path ./here")]
@@ -545,11 +544,49 @@ class MyHashtable : hashtable
             AssertPrettyPrintedStatementIdentical(script);
         }
 
+        [Fact]
+        public void TestUsingNamespace()
+        {
+            string script = "using namespace System.Collections.Generic\n";
+            AssertPrettyPrintedUsingStatementIdentical(script);
+        }
+
+#if PS7
+        // This test fails in WinPS due to non-determinism in the parser
+        [Fact]
+        public void TestUsingAssembly()
+        {
+            string script = "using assembly System.Windows.Forms\n";
+            AssertPrettyPrintedUsingStatementIdentical(script);
+        }
+#endif
+
+        [Fact]
+        public void TestUsingModule()
+        {
+            string script = "using module PSScriptAnalyzer\n";
+            AssertPrettyPrintedUsingStatementIdentical(script);
+        }
+
+        [Fact]
+        public void TestUsingModuleWithHashtable()
+        {
+            string script = "using module @{ ModuleName = 'PSScriptAnalyzer'; ModuleVersion = '1.18.3' }\n";
+            AssertPrettyPrintedUsingStatementIdentical(script);
+        }
+
         private void AssertPrettyPrintedStatementIdentical(string input)
         {
             Ast ast = Parser.ParseInput(input, out Token[] _, out ParseError[] _);
             StatementAst statementAst = ((ScriptBlockAst)ast).EndBlock.Statements[0];
             Assert.Equal(NormalizeScript(input), NormalizeScript(PrettyPrinter.PrettyPrint(statementAst)));
+        }
+
+        private void AssertPrettyPrintedUsingStatementIdentical(string input)
+        {
+            Ast ast = Parser.ParseInput(input, out Token[] _, out ParseError[] _);
+            UsingStatementAst usingAst = ((ScriptBlockAst)ast).UsingStatements[0];
+            Assert.Equal(NormalizeScript(input), NormalizeScript(PrettyPrinter.PrettyPrint(usingAst)));
         }
 
         private static string NormalizeScript(string input)

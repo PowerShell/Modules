@@ -1049,7 +1049,22 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (usingStatementAst.ModuleSpecification != null)
             {
-                usingStatementAst.ModuleSpecification.Visit(this);
+                _sb.Append("@{ ");
+                usingStatementAst.ModuleSpecification.KeyValuePairs[0].Item1.Visit(this);
+                _sb.Append(" = ");
+                usingStatementAst.ModuleSpecification.KeyValuePairs[0].Item2.Visit(this);
+
+                for (int i = 1; i < usingStatementAst.ModuleSpecification.KeyValuePairs.Count; i++)
+                {
+                    _sb.Append("; ");
+                    usingStatementAst.ModuleSpecification.KeyValuePairs[i].Item1.Visit(this);
+                    _sb.Append(" = ");
+                    usingStatementAst.ModuleSpecification.KeyValuePairs[i].Item2.Visit(this);
+                }
+
+                _sb.Append(" }");
+                EndStatement();
+
                 return AstVisitAction.SkipChildren;
             }
 
