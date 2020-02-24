@@ -439,12 +439,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
             }
 
             Indent();
-            WriteHashtableEntry(hashtableAst.KeyValuePairs[0]);
-            for (int i = 1; i < hashtableAst.KeyValuePairs.Count; i++)
-            {
-                Newline();
-                WriteHashtableEntry(hashtableAst.KeyValuePairs[i]);
-            }
+
+            Intersperse(
+                hashtableAst.KeyValuePairs,
+                WriteHashtableEntry,
+                Newline);
+
             Dedent();
             _sb.Append('}');
 
@@ -564,14 +564,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             Indent();
 
-            paramBlockAst.Parameters[0].Visit(this);
-
-            for (int i = 1; i < paramBlockAst.Parameters.Count; i++)
-            {
-                _sb.Append(',');
-                Newline(count: 2);
-                paramBlockAst.Parameters[i].Visit(this);
-            }
+            Intersperse(
+                paramBlockAst.Parameters,
+                () => { _sb.Append(','); Newline(count: 2); });
 
             Dedent();
             _sb.Append(')');
@@ -819,15 +814,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 hasCases = true;
 
-                switchStatementAst.Clauses[0].Item1.Visit(this);
-                switchStatementAst.Clauses[0].Item2.Visit(this);
-
-                for (int i = 1; i < switchStatementAst.Clauses.Count; i++)
-                {
-                    Newline(count: 2);
-                    switchStatementAst.Clauses[i].Item1.Visit(this);
-                    switchStatementAst.Clauses[i].Item2.Visit(this);
-                }
+                Intersperse(
+                    switchStatementAst.Clauses,
+                    (caseClause) => { caseClause.Item1.Visit(this); caseClause.Item2.Visit(this); },
+                    () => Newline(count: 2));
             }
 
             if (switchStatementAst.Default != null)
@@ -938,13 +928,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 _sb.Append(" : ");
 
-                WriteTypeName(typeDefinitionAst.BaseTypes[0].TypeName);
-
-                for (int i = 1; i < typeDefinitionAst.BaseTypes.Count; i++)
-                {
-                    _sb.Append(_comma);
-                    WriteTypeName(typeDefinitionAst.BaseTypes[i].TypeName);
-                }
+                Intersperse(
+                    typeDefinitionAst.BaseTypes,
+                    (baseType) => WriteTypeName(baseType.TypeName),
+                    () => _sb.Append(_comma));
             }
 
             if (IsEmpty(typeDefinitionAst.Members))
@@ -1066,17 +1053,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
             if (usingStatementAst.ModuleSpecification != null)
             {
                 _sb.Append("@{ ");
-                usingStatementAst.ModuleSpecification.KeyValuePairs[0].Item1.Visit(this);
-                _sb.Append(" = ");
-                usingStatementAst.ModuleSpecification.KeyValuePairs[0].Item2.Visit(this);
 
-                for (int i = 1; i < usingStatementAst.ModuleSpecification.KeyValuePairs.Count; i++)
-                {
-                    _sb.Append("; ");
-                    usingStatementAst.ModuleSpecification.KeyValuePairs[i].Item1.Visit(this);
-                    _sb.Append(" = ");
-                    usingStatementAst.ModuleSpecification.KeyValuePairs[i].Item2.Visit(this);
-                }
+                Intersperse(
+                    usingStatementAst.ModuleSpecification.KeyValuePairs,
+                    (kvp) => { kvp.Item1.Visit(this); _sb.Append(" = "); kvp.Item2.Visit(this); },
+                    () => { _sb.Append("; "); });
 
                 _sb.Append(" }");
                 EndStatement();
@@ -1181,12 +1162,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
                     _sb.Append(genericTypeName.FullName)
                        .Append('[');
 
-                    WriteTypeName(genericTypeName.GenericArguments[0]);
-                    for (int i = 1; i < genericTypeName.GenericArguments.Count; i++)
-                    {
-                        _sb.Append(_comma);
-                        WriteTypeName(genericTypeName.GenericArguments[i]);
-                    }
+                    Intersperse(
+                        genericTypeName.GenericArguments,
+                        (gtn) => WriteTypeName(gtn),
+                        () => _sb.Append(_comma));
 
                     _sb.Append(']');
                     break;
