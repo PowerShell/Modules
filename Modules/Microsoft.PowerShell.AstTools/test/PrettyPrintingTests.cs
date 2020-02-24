@@ -534,9 +534,9 @@ class Duck
         public void TestClassConstructorWithBaseClass()
         {
             string script = @"
-class Duck : object
+class MyHashtable : hashtable
 {
-    Duck() : base()
+    MyHashtable([int]$count) : base($count)
     {
     }
 }

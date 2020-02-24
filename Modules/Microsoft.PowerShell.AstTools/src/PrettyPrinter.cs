@@ -78,13 +78,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
             _sb.Append('[').Append(attributeAst.TypeName).Append('(');
 
             bool hadPositionalArgs = false;
-            if (attributeAst.PositionalArguments != null && attributeAst.PositionalArguments.Count > 0)
+            if (!IsEmpty(attributeAst.PositionalArguments))
             {
                 hadPositionalArgs = true;
                 Intersperse(attributeAst.PositionalArguments, _comma);
             }
 
-            if (attributeAst.NamedArguments != null && attributeAst.NamedArguments.Count > 0)
+            if (!IsEmpty(attributeAst.NamedArguments))
             {
                 if (hadPositionalArgs)
                 {
@@ -107,9 +107,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitBaseCtorInvokeMemberExpression(BaseCtorInvokeMemberExpressionAst baseCtorInvokeMemberExpressionAst)
         {
-            _sb.Append("base(");
-            Intersperse(baseCtorInvokeMemberExpressionAst.Arguments, ", ");
-            _sb.Append(')');
+            if (!IsEmpty(baseCtorInvokeMemberExpressionAst.Arguments))
+            {
+                _sb.Append("base(");
+                Intersperse(baseCtorInvokeMemberExpressionAst.Arguments, ", ");
+                _sb.Append(')');
+            }
+
             return AstVisitAction.SkipChildren;
         }
 
@@ -137,7 +141,19 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitCatchClause(CatchClauseAst catchClauseAst)
         {
-            throw new NotImplementedException();
+            _sb.Append("catch");
+            if (!IsEmpty(catchClauseAst.CatchTypes))
+            {
+                foreach (TypeConstraintAst typeConstraint in catchClauseAst.CatchTypes)
+                {
+                    _sb.Append(' ');
+                    typeConstraint.Visit(this);
+                }
+            }
+
+            catchClauseAst.Body.Visit(this);
+
+            return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitCommand(CommandAst commandAst)
@@ -149,7 +165,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             Intersperse(commandAst.CommandElements, " ");
 
-            if (commandAst.Redirections != null && commandAst.Redirections.Count > 0)
+            if (!IsEmpty(commandAst.Redirections))
             {
                 _sb.Append(' ');
                 Intersperse(commandAst.Redirections, " ");
@@ -375,9 +391,39 @@ namespace Microsoft.PowerShell.PrettyPrinter
             _sb.Append(functionMemberAst.Name).Append('(');
             WriteInlineParameters(functionMemberAst.Parameters);
             _sb.Append(')');
-            Newline();
 
-            functionMemberAst.Body.Visit(this);
+            IReadOnlyList<StatementAst> statementAsts = functionMemberAst.Body.EndBlock.Statements;
+
+            if (functionMemberAst.IsConstructor)
+            {
+                var baseCtorCall = (BaseCtorInvokeMemberExpressionAst)((CommandExpressionAst)functionMemberAst.Body.EndBlock.Statements[0]).Expression;
+
+                if (!IsEmpty(baseCtorCall.Arguments))
+                {
+                    _sb.Append(" : ");
+                    baseCtorCall.Visit(this);
+                }
+
+                var newStatementAsts = new StatementAst[functionMemberAst.Body.EndBlock.Statements.Count - 1];
+                for (int i = 0; i < newStatementAsts.Length; i++)
+                {
+                    newStatementAsts[i] = functionMemberAst.Body.EndBlock.Statements[i + 1];
+                }
+                statementAsts = newStatementAsts;
+            }
+
+            if (IsEmpty(statementAsts) && IsEmpty(functionMemberAst.Body.EndBlock.Traps))
+            {
+                Newline();
+                _sb.Append('{');
+                Newline();
+                _sb.Append('}');
+                return AstVisitAction.SkipChildren;
+            }
+
+            BeginBlock();
+            WriteStatementBlock(statementAsts, functionMemberAst.Body.EndBlock.Traps);
+            EndBlock();
 
             return AstVisitAction.SkipChildren;
         }
@@ -386,7 +432,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             _sb.Append("@{");
 
-            if (hashtableAst.KeyValuePairs == null || hashtableAst.KeyValuePairs.Count == 0)
+            if (IsEmpty(hashtableAst.KeyValuePairs))
             {
                 _sb.Append('}');
                 return AstVisitAction.SkipChildren;
@@ -501,9 +547,18 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitParamBlock(ParamBlockAst paramBlockAst)
         {
+            if (!IsEmpty(paramBlockAst.Attributes))
+            {
+                foreach (AttributeAst attributeAst in paramBlockAst.Attributes)
+                {
+                    attributeAst.Visit(this);
+                    Newline();
+                }
+            }
+
             _sb.Append("param(");
 
-            if (paramBlockAst.Parameters == null || paramBlockAst.Parameters.Count == 0)
+            if (IsEmpty(paramBlockAst.Parameters))
             {
                 _sb.Append(')');
                 return AstVisitAction.SkipChildren;
@@ -528,7 +583,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitParameter(ParameterAst parameterAst)
         {
-            if (parameterAst.Attributes != null && parameterAst.Attributes.Count > 0)
+            if (!IsEmpty(parameterAst.Attributes))
             {
                 foreach (AttributeBaseAst attribute in parameterAst.Attributes)
                 {
@@ -621,8 +676,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             _sb.Append('{');
             Indent();
+            bool needNewline = false;
             if (scriptBlockAst.ParamBlock != null)
             {
+                needNewline = true;
                 scriptBlockAst.ParamBlock.Visit(this);
             }
 
@@ -630,31 +687,53 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (scriptBlockAst.DynamicParamBlock != null)
             {
-                Newline();
+                needNewline = useExplicitEndBlock = true;
+                if (needNewline)
+                {
+                    Newline(count: 2);
+                }
+
                 scriptBlockAst.DynamicParamBlock.Visit(this);
             }
 
             if (scriptBlockAst.BeginBlock != null)
             {
-                useExplicitEndBlock = true;
-                Newline();
+                needNewline = useExplicitEndBlock = true;
+                if (needNewline)
+                {
+                    Newline(count: 2);
+                }
+
                 scriptBlockAst.BeginBlock.Visit(this);
             }
 
             if (scriptBlockAst.ProcessBlock != null)
             {
-                useExplicitEndBlock = true;
-                Newline();
+                needNewline = useExplicitEndBlock = true;
+                if (needNewline)
+                {
+                    Newline(count: 2);
+                }
+
                 scriptBlockAst.ProcessBlock.Visit(this);
             }
 
-            if (useExplicitEndBlock)
+            if (!IsEmpty(scriptBlockAst.EndBlock.Statements) || !IsEmpty(scriptBlockAst.EndBlock.Traps))
             {
-                scriptBlockAst.EndBlock.Visit(this);
-            }
-            else
-            {
-                WriteStatementBlock(scriptBlockAst.EndBlock.Statements, scriptBlockAst.EndBlock.Traps);
+                if (useExplicitEndBlock)
+                {
+                    Newline(count: 2);
+                    scriptBlockAst.EndBlock.Visit(this);
+                }
+                else
+                {
+                    if (needNewline)
+                    {
+                        Newline(count: 2);
+                    }
+
+                    WriteStatementBlock(scriptBlockAst.EndBlock.Statements, scriptBlockAst.EndBlock.Traps);
+                }
             }
 
             Dedent();
@@ -717,7 +796,48 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitSwitchStatement(SwitchStatementAst switchStatementAst)
         {
-            throw new NotImplementedException();
+            if (switchStatementAst.Label != null)
+            {
+                _sb.Append(':').Append(switchStatementAst.Label).Append(' ');
+            }
+
+            _sb.Append("switch (");
+            switchStatementAst.Condition.Visit(this);
+            _sb.Append(')');
+
+            BeginBlock();
+
+            bool hasCases = false;
+            if (!IsEmpty(switchStatementAst.Clauses))
+            {
+                hasCases = true;
+
+                switchStatementAst.Clauses[0].Item1.Visit(this);
+                switchStatementAst.Clauses[0].Item2.Visit(this);
+
+                for (int i = 1; i < switchStatementAst.Clauses.Count; i++)
+                {
+                    Newline(count: 2);
+                    switchStatementAst.Clauses[i].Item1.Visit(this);
+                    switchStatementAst.Clauses[i].Item2.Visit(this);
+                }
+            }
+
+            if (switchStatementAst.Default != null)
+            {
+                if (hasCases)
+                {
+                    Newline();
+                }
+
+                _sb.Append("default");
+                Newline();
+                switchStatementAst.Default.Visit(this);
+            }
+
+            EndBlock();
+
+            return AstVisitAction.SkipChildren;
         }
 
 #if PS7
@@ -756,7 +876,26 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitTryStatement(TryStatementAst tryStatementAst)
         {
-            throw new NotImplementedException();
+            _sb.Append("try");
+            tryStatementAst.Body.Visit(this);
+
+            if (!IsEmpty(tryStatementAst.CatchClauses))
+            {
+                foreach (CatchClauseAst catchClause in tryStatementAst.CatchClauses)
+                {
+                    Newline();
+                    catchClause.Visit(this);
+                }
+            }
+
+            if (tryStatementAst.Finally != null)
+            {
+                Newline();
+                _sb.Append("finally");
+                tryStatementAst.Finally.Visit(this);
+            }
+
+            return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitTypeConstraint(TypeConstraintAst typeConstraintAst)
@@ -789,7 +928,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             _sb.Append(typeDefinitionAst.Name);
 
-            if (typeDefinitionAst.BaseTypes != null && typeDefinitionAst.BaseTypes.Count > 0)
+            if (!IsEmpty(typeDefinitionAst.BaseTypes))
             {
                 _sb.Append(" : ");
 
@@ -802,7 +941,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 }
             }
 
-            if (typeDefinitionAst.Members == null || typeDefinitionAst.Members.Count == 0)
+            if (IsEmpty(typeDefinitionAst.Members))
             {
                 Newline();
                 _sb.Append('{');
@@ -880,7 +1019,54 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitUsingStatement(UsingStatementAst usingStatementAst)
         {
-            throw new NotImplementedException();
+            _sb.Append("using ");
+
+            switch (usingStatementAst.UsingStatementKind)
+            {
+                case UsingStatementKind.Assembly:
+                    _sb.Append("assembly ");
+                    break;
+
+                case UsingStatementKind.Command:
+                    _sb.Append("command ");
+                    break;
+
+                case UsingStatementKind.Module:
+                    _sb.Append("module ");
+                    break;
+
+                case UsingStatementKind.Namespace:
+                    _sb.Append("namespace ");
+                    break;
+
+                case UsingStatementKind.Type:
+                    _sb.Append("type ");
+                    break;
+
+                default:
+                    throw new ArgumentException($"Unknown using statement kind: '{usingStatementAst.UsingStatementKind}'");
+            }
+
+            if (usingStatementAst.ModuleSpecification != null)
+            {
+                usingStatementAst.ModuleSpecification.Visit(this);
+                return AstVisitAction.SkipChildren;
+            }
+
+            if (usingStatementAst.Name != null)
+            {
+                usingStatementAst.Name.Visit(this);
+            }
+
+            if (usingStatementAst.Alias != null)
+            {
+                _sb.Append(" = ");
+                usingStatementAst.Alias.Visit(this);
+            }
+
+            EndStatement();
+
+            return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitVariableExpression(VariableExpressionAst variableExpressionAst)
@@ -901,7 +1087,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private void WriteInlineParameters(IReadOnlyList<ParameterAst> parameters)
         {
-            if (parameters == null || parameters.Count == 0)
+            if (IsEmpty(parameters))
             {
                 return;
             }
@@ -1059,7 +1245,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         private void WriteStatementBlock(IReadOnlyList<StatementAst> statements, IReadOnlyList<TrapStatementAst> traps = null)
         {
             bool wroteTrap = false;
-            if (traps != null && traps.Count > 0)
+            if (!IsEmpty(traps))
             {
                 wroteTrap = true;
                 foreach (TrapStatementAst trap in traps)
@@ -1068,18 +1254,18 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 }
             }
 
-            if (statements != null && statements.Count > 0)
+            if (!IsEmpty(statements))
             {
                 if (wroteTrap)
                 {
-                    EndStatement();
+                    Newline();
                 }
 
                 statements[0].Visit(this);
 
                 for (int i = 1; i < statements.Count; i++)
                 {
-                    EndStatement();
+                    Newline();
                     statements[i].Visit(this);
                 }
             }
@@ -1144,7 +1330,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private void Intersperse(IReadOnlyList<Ast> asts, string separator)
         {
-            if (asts == null || asts.Count == 0)
+            if (IsEmpty(asts))
             {
                 return;
             }
@@ -1555,6 +1741,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 default:
                     throw new ArgumentException($"Unable to stringify token kind '{tokenKind}'");
             }
+        }
+
+        private static bool IsEmpty<T>(IReadOnlyCollection<T> collection)
+        {
+            return collection == null
+                || collection.Count == 0;
         }
     }
 }
