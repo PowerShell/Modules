@@ -720,7 +720,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 scriptBlockAst.ProcessBlock.Visit(this);
             }
 
-            if (!IsEmpty(scriptBlockAst.EndBlock.Statements) || !IsEmpty(scriptBlockAst.EndBlock.Traps))
+            if (scriptBlockAst.EndBlock != null
+                && (!IsEmpty(scriptBlockAst.EndBlock.Statements) || !IsEmpty(scriptBlockAst.EndBlock.Traps)))
             {
                 if (useExplicitEndBlock)
                 {
@@ -958,13 +959,23 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             BeginBlock();
 
-            if (typeDefinitionAst.IsEnum)
+            if (typeDefinitionAst.Members != null)
             {
-                Intersperse(typeDefinitionAst.Members, "," + _newline);
-            }
-            else if (typeDefinitionAst.IsClass)
-            {
-                Intersperse(typeDefinitionAst.Members, _newline + _newline);
+                if (typeDefinitionAst.IsEnum)
+                {
+                    Intersperse(typeDefinitionAst.Members, () =>
+                    {
+                        _sb.Append(',');
+                        Newline();
+                    });
+                }
+                else if (typeDefinitionAst.IsClass)
+                {
+                    Intersperse(typeDefinitionAst.Members, () =>
+                    {
+                        Newline(count: 2);
+                    });
+                }
             }
 
             EndBlock();
@@ -1112,11 +1123,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 return;
             }
 
-            WriteInlineParameter(parameters[0]);
-
-            for (int i = 1; i < parameters.Count; i++)
+            foreach (ParameterAst parameterAst in parameters)
             {
-                WriteInlineParameter(parameters[i]);
+                WriteInlineParameter(parameterAst);
             }
         }
 
@@ -1367,6 +1376,38 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 _sb.Append(separator);
                 asts[i].Visit(this);
+            }
+        }
+
+        private void Intersperse(IReadOnlyList<Ast> asts, Action writeSeparator)
+        {
+            if (IsEmpty(asts))
+            {
+                return;
+            }
+
+            asts[0].Visit(this);
+
+            for (int i = 1; i < asts.Count; i++)
+            {
+                writeSeparator();
+                asts[i].Visit(this);
+            }
+        }
+
+        private void Intersperse<T>(IReadOnlyList<T> astObjects, Action<T> writeObject, Action writeSeparator)
+        {
+            if (IsEmpty(astObjects))
+            {
+                return;
+            }
+
+            writeObject(astObjects[0]);
+
+            for (int i = 1; i < astObjects.Count; i++)
+            {
+                writeSeparator();
+                writeObject(astObjects[i]);
             }
         }
 
