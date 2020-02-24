@@ -6,15 +6,42 @@ using System.Text;
 
 namespace Microsoft.PowerShell.PrettyPrinter
 {
-    public class PrettyPrinter : AstVisitor2
+    public class PrettyPrinter
     {
-        public static string PrettyPrint(Ast ast)
+        private readonly PrettyPrintingVisitor _visitor;
+
+        public PrettyPrinter()
         {
-            var pp = new PrettyPrinter();
-            ast.Visit(pp);
-            return pp.GetPrettyPrintResult();
+            _visitor = new PrettyPrintingVisitor();
         }
 
+        public string PrettyPrintInput(string input)
+        {
+            Ast ast = Parser.ParseInput(input, out Token[] tokens, out ParseError[] errors);
+
+            if (errors != null && errors.Length > 0)
+            {
+                throw new ParseException(errors);
+            }
+
+            return _visitor.Run(ast, tokens);
+        }
+
+        public string PrettyPrintFile(string filePath)
+        {
+            Ast ast = Parser.ParseFile(filePath, out Token[] tokens, out ParseError[] errors);
+
+            if (errors != null && errors.Length > 0)
+            {
+                throw new ParseException(errors);
+            }
+
+            return _visitor.Run(ast, tokens);
+        }
+    }
+
+    internal class PrettyPrintingVisitor : AstVisitor2
+    {
         private readonly StringBuilder _sb;
 
         private readonly string _newline;
@@ -23,9 +50,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private readonly string _comma;
 
+        private IReadOnlyList<Token> _tokens;
+
         private int _indent;
 
-        public PrettyPrinter()
+        public PrettyPrintingVisitor()
         {
             _sb = new StringBuilder();
             _newline = "\n";
@@ -34,13 +63,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
             _indent = 0;
         }
 
-        public void Clear()
+        public string Run(Ast ast, Token[] tokens)
         {
             _sb.Clear();
-        }
-
-        public string GetPrettyPrintResult()
-        {
+            _tokens = tokens;
+            ast.Visit(this);
             return _sb.ToString();
         }
 
@@ -679,6 +706,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 needNewline = true;
                 scriptBlockAst.ParamBlock.Visit(this);
             }
+
+            Intersperse(scriptBlockAst.UsingStatements, Newline);
 
             bool useExplicitEndBlock = false;
 
@@ -1811,5 +1840,16 @@ namespace Microsoft.PowerShell.PrettyPrinter
             return collection == null
                 || collection.Count == 0;
         }
+    }
+
+    public class ParseException : Exception
+    {
+        public ParseException(IReadOnlyList<ParseError> parseErrors)
+            : base("A parse error was encountered while parsing the input script")
+        {
+            ParseErrors = parseErrors;
+        }
+
+        public IReadOnlyList<ParseError> ParseErrors { get; }
     }
 }

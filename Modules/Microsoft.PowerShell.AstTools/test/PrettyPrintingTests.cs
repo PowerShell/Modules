@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Management.Automation.Language;
 using Microsoft.PowerShell.PrettyPrinter;
 using Xunit;
@@ -7,6 +8,13 @@ namespace test
 {
     public class PrettyPrinterTests
     {
+        private readonly PrettyPrinter _pp;
+
+        public PrettyPrinterTests()
+        {
+            _pp = new PrettyPrinter();
+        }
+
         [Theory()]
         [InlineData("$x")]
         [InlineData("- $x")]
@@ -551,28 +559,24 @@ class MyHashtable : hashtable
             AssertPrettyPrintedUsingStatementIdentical(script);
         }
 
-#if PS7
-        // This test fails in WinPS due to non-determinism in the parser
-        [Fact]
-        public void TestUsingAssembly()
-        {
-            string script = "using assembly System.Windows.Forms\n";
-            AssertPrettyPrintedUsingStatementIdentical(script);
-        }
-#endif
-
         [Fact]
         public void TestUsingModule()
         {
-            string script = "using module PSScriptAnalyzer\n";
-            AssertPrettyPrintedUsingStatementIdentical(script);
+            string script = "using module PrettyPrintingTestModule\n";
+            using (ModuleContext.Create("PrettyPrintingTestModule", new Version(1, 0)))
+            {
+                AssertPrettyPrintedUsingStatementIdentical(script);
+            }
         }
 
         [Fact]
         public void TestUsingModuleWithHashtable()
         {
-            string script = "using module @{ ModuleName = 'PSScriptAnalyzer'; ModuleVersion = '1.18.3' }\n";
-            AssertPrettyPrintedUsingStatementIdentical(script);
+            string script = "using module @{ ModuleName = 'PrettyPrintingTestModule'; ModuleVersion = '1.18' }\n";
+            using (ModuleContext.Create("PrettyPrintingTestModule", new Version(1, 18)))
+            {
+                AssertPrettyPrintedUsingStatementIdentical(script);
+            }
         }
 
         [Fact]
@@ -690,27 +694,58 @@ end
 
         private void AssertPrettyPrintedStatementIdentical(string input)
         {
-            Ast ast = Parser.ParseInput(input, out Token[] _, out ParseError[] _);
-            StatementAst statementAst = ((ScriptBlockAst)ast).EndBlock.Statements[0];
-            Assert.Equal(NormalizeScript(input), NormalizeScript(PrettyPrinter.PrettyPrint(statementAst)));
+            Assert.Equal(NormalizeScript(input), NormalizeScript(_pp.PrettyPrintInput(input)));
         }
 
         private void AssertPrettyPrintedUsingStatementIdentical(string input)
         {
-            Ast ast = Parser.ParseInput(input, out Token[] _, out ParseError[] _);
-            UsingStatementAst usingAst = ((ScriptBlockAst)ast).UsingStatements[0];
-            Assert.Equal(NormalizeScript(input), NormalizeScript(PrettyPrinter.PrettyPrint(usingAst)));
+            Assert.Equal(NormalizeScript(input), NormalizeScript(_pp.PrettyPrintInput(input)));
         }
 
         private void AssertPrettyPrintedScriptIdentical(string input)
         {
-            Ast ast = Parser.ParseInput(input, out Token[] _, out ParseError[] _);
-            Assert.Equal(NormalizeScript(input), NormalizeScript(PrettyPrinter.PrettyPrint(ast)));
+            Assert.Equal(NormalizeScript(input), NormalizeScript(_pp.PrettyPrintInput(input)));
         }
 
         private static string NormalizeScript(string input)
         {
             return input.Trim().Replace(Environment.NewLine, "\n");
+        }
+    }
+
+    internal class ModuleContext : IDisposable
+    {
+        public static ModuleContext Create(string moduleName, Version moduleVersion)
+        {
+            string tmpDirPath = Path.GetTempPath();
+            Directory.CreateDirectory(tmpDirPath);
+            string modulePath = Path.Combine(tmpDirPath, moduleName);
+            Directory.CreateDirectory(modulePath);
+            string manifestPath = Path.Combine(modulePath, $"{moduleName}.psd1");
+            File.WriteAllText(manifestPath, $"@{{ ModuleVersion = '{moduleVersion}' }}");
+
+            string oldPSModulePath = Environment.GetEnvironmentVariable("PSModulePath");
+            Environment.SetEnvironmentVariable("PSModulePath", tmpDirPath);
+
+            return new ModuleContext(modulePath, oldPSModulePath);
+        }
+
+        private readonly string _psModulePath;
+
+        private readonly string _modulePath;
+
+        public ModuleContext(
+            string modulePath,
+            string psModulePath)
+        {
+            _modulePath = modulePath;
+            _psModulePath = psModulePath;
+        }
+
+        public void Dispose()
+        {
+            Directory.Delete(_modulePath, recursive: true);
+            Environment.SetEnvironmentVariable("PSModulePath", _psModulePath);
         }
     }
 }
