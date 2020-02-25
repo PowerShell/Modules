@@ -50,6 +50,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private readonly string _comma;
 
+        private int _tokenIndex;
+
         private IReadOnlyList<Token> _tokens;
 
         private int _indent;
@@ -66,6 +68,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public string Run(Ast ast, Token[] tokens)
         {
             _sb.Clear();
+            _tokenIndex = 0;
             _tokens = tokens;
             ast.Visit(this);
             return _sb.ToString();
@@ -73,10 +76,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitArrayExpression(ArrayExpressionAst arrayExpressionAst)
         {
+            WriteCommentsToAstPosition(arrayExpressionAst);
+
             _sb.Append("@(");
-
             WriteStatementBlock(arrayExpressionAst.SubExpression.Statements, arrayExpressionAst.SubExpression.Traps);
-
             _sb.Append(")");
 
             return AstVisitAction.SkipChildren;
@@ -102,6 +105,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitAttribute(AttributeAst attributeAst)
         {
+            WriteCommentsToAstPosition(attributeAst);
+
             _sb.Append('[').Append(attributeAst.TypeName).Append('(');
 
             bool hadPositionalArgs = false;
@@ -134,6 +139,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitBaseCtorInvokeMemberExpression(BaseCtorInvokeMemberExpressionAst baseCtorInvokeMemberExpressionAst)
         {
+            WriteCommentsToAstPosition(baseCtorInvokeMemberExpressionAst);
+
             if (!IsEmpty(baseCtorInvokeMemberExpressionAst.Arguments))
             {
                 _sb.Append("base(");
@@ -162,12 +169,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitBreakStatement(BreakStatementAst breakStatementAst)
         {
+            WriteCommentsToAstPosition(breakStatementAst);
             WriteControlFlowStatement("break", breakStatementAst.Label);
             return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitCatchClause(CatchClauseAst catchClauseAst)
         {
+            WriteCommentsToAstPosition(catchClauseAst);
+
             _sb.Append("catch");
             if (!IsEmpty(catchClauseAst.CatchTypes))
             {
@@ -185,6 +195,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitCommand(CommandAst commandAst)
         {
+            WriteCommentsToAstPosition(commandAst);
+
             if (commandAst.InvocationOperator != TokenKind.Unknown)
             {
                 _sb.Append(GetTokenString(commandAst.InvocationOperator)).Append(' ');
@@ -209,6 +221,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitCommandParameter(CommandParameterAst commandParameterAst)
         {
+            WriteCommentsToAstPosition(commandParameterAst);
+
             _sb.Append('-');
             _sb.Append(commandParameterAst.ParameterName);
 
@@ -228,6 +242,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitConstantExpression(ConstantExpressionAst constantExpressionAst)
         {
+            WriteCommentsToAstPosition(constantExpressionAst);
+
             if (constantExpressionAst.Value == null)
             {
                 _sb.Append("$null");
@@ -246,6 +262,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitContinueStatement(ContinueStatementAst continueStatementAst)
         {
+            WriteCommentsToAstPosition(continueStatementAst);
             WriteControlFlowStatement("continue", continueStatementAst.Label);
             return AstVisitAction.SkipChildren;
         }
@@ -264,6 +281,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitDoUntilStatement(DoUntilStatementAst doUntilStatementAst)
         {
+            WriteCommentsToAstPosition(doUntilStatementAst);
             _sb.Append("do");
             doUntilStatementAst.Body.Visit(this);
             _sb.Append(" until (");
@@ -276,6 +294,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitDoWhileStatement(DoWhileStatementAst doWhileStatementAst)
         {
+            WriteCommentsToAstPosition(doWhileStatementAst);
             _sb.Append("do");
             doWhileStatementAst.Body.Visit(this);
             _sb.Append(" while (");
@@ -309,12 +328,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitExpandableStringExpression(ExpandableStringExpressionAst expandableStringExpressionAst)
         {
+            WriteCommentsToAstPosition(expandableStringExpressionAst);
             _sb.Append('"').Append(expandableStringExpressionAst.Value).Append('"');
             return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitFileRedirection(FileRedirectionAst redirectionAst)
         {
+            WriteCommentsToAstPosition(redirectionAst);
+
             if (redirectionAst.FromStream != RedirectionStream.Output)
             {
                 _sb.Append(GetStreamIndicator(redirectionAst.FromStream));
@@ -327,38 +349,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
             return AstVisitAction.SkipChildren;
         }
 
-        private char GetStreamIndicator(RedirectionStream stream)
-        {
-            switch (stream)
-            {
-                case RedirectionStream.All:
-                    return '*';
-
-                case RedirectionStream.Debug:
-                    return '5';
-
-                case RedirectionStream.Error:
-                    return '2';
-
-                case RedirectionStream.Information:
-                    return '6';
-
-                case RedirectionStream.Output:
-                    return '1';
-
-                case RedirectionStream.Verbose:
-                    return '4';
-
-                case RedirectionStream.Warning:
-                    return '3';
-
-                default:
-                    throw new ArgumentException($"Unknown redirection stream: '{stream}'");
-            }
-        }
-
         public override AstVisitAction VisitForEachStatement(ForEachStatementAst forEachStatementAst)
         {
+            WriteCommentsToAstPosition(forEachStatementAst);
+
             _sb.Append("foreach (");
             forEachStatementAst.Variable.Visit(this);
             _sb.Append(" in ");
@@ -372,6 +366,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitForStatement(ForStatementAst forStatementAst)
         {
+            WriteCommentsToAstPosition(forStatementAst);
+
             _sb.Append("for (");
             forStatementAst.Initializer.Visit(this);
             _sb.Append("; ");
@@ -386,6 +382,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitFunctionDefinition(FunctionDefinitionAst functionDefinitionAst)
         {
+            WriteCommentsToAstPosition(functionDefinitionAst);
+
             _sb.Append(functionDefinitionAst.IsFilter ? "filter " : "function ");
             _sb.Append(functionDefinitionAst.Name);
             Newline();
@@ -397,6 +395,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitFunctionMember(FunctionMemberAst functionMemberAst)
         {
+            WriteCommentsToAstPosition(functionMemberAst);
+
             if (!functionMemberAst.IsConstructor)
             {
                 if (functionMemberAst.IsStatic)
@@ -457,6 +457,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitHashtable(HashtableAst hashtableAst)
         {
+            WriteCommentsToAstPosition(hashtableAst);
+
             _sb.Append("@{");
 
             if (IsEmpty(hashtableAst.KeyValuePairs))
@@ -480,6 +482,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitIfStatement(IfStatementAst ifStmtAst)
         {
+            WriteCommentsToAstPosition(ifStmtAst);
+
             _sb.Append("if (");
             ifStmtAst.Clauses[0].Item1.Visit(this);
             _sb.Append(')');
@@ -506,6 +510,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitIndexExpression(IndexExpressionAst indexExpressionAst)
         {
+            WriteCommentsToAstPosition(indexExpressionAst);
+
             indexExpressionAst.Target.Visit(this);
             _sb.Append('[');
             indexExpressionAst.Index.Visit(this);
@@ -526,6 +532,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitMemberExpression(MemberExpressionAst memberExpressionAst)
         {
+            WriteCommentsToAstPosition(memberExpressionAst);
+
             memberExpressionAst.Expression.Visit(this);
             _sb.Append(memberExpressionAst.Static ? "::" : ".");
             memberExpressionAst.Member.Visit(this);
@@ -534,6 +542,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitMergingRedirection(MergingRedirectionAst redirectionAst)
         {
+            WriteCommentsToAstPosition(redirectionAst);
+
             _sb.Append(GetStreamIndicator(redirectionAst.FromStream))
                 .Append(">&")
                 .Append(GetStreamIndicator(redirectionAst.ToStream));
@@ -543,6 +553,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitNamedAttributeArgument(NamedAttributeArgumentAst namedAttributeArgumentAst)
         {
+            WriteCommentsToAstPosition(namedAttributeArgumentAst);
+
            _sb.Append(namedAttributeArgumentAst.ArgumentName);
 
             if (!namedAttributeArgumentAst.ExpressionOmitted && namedAttributeArgumentAst.Argument != null)
@@ -556,6 +568,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitNamedBlock(NamedBlockAst namedBlockAst)
         {
+            WriteCommentsToAstPosition(namedBlockAst);
+
             if (!namedBlockAst.Unnamed)
             {
                 _sb.Append(GetTokenString(namedBlockAst.BlockKind));
@@ -572,6 +586,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitParamBlock(ParamBlockAst paramBlockAst)
         {
+            WriteCommentsToAstPosition(paramBlockAst);
+
             if (!IsEmpty(paramBlockAst.Attributes))
             {
                 foreach (AttributeAst attributeAst in paramBlockAst.Attributes)
@@ -603,6 +619,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitParameter(ParameterAst parameterAst)
         {
+            WriteCommentsToAstPosition(parameterAst);
+
             if (!IsEmpty(parameterAst.Attributes))
             {
                 foreach (AttributeBaseAst attribute in parameterAst.Attributes)
@@ -625,6 +643,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitParenExpression(ParenExpressionAst parenExpressionAst)
         {
+            WriteCommentsToAstPosition(parenExpressionAst);
             _sb.Append('(');
             parenExpressionAst.Pipeline.Visit(this);
             _sb.Append(')');
@@ -634,6 +653,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitPipeline(PipelineAst pipelineAst)
         {
+            WriteCommentsToAstPosition(pipelineAst);
+
             Intersperse(pipelineAst.PipelineElements, " | ");
 #if PS7
             if (pipelineAst.Background)
@@ -647,6 +668,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 #if PS7
         public override AstVisitAction VisitPipelineChain(PipelineChainAst statementChain)
         {
+            WriteCommentsToAstPosition(statementChain);
             statementChain.LhsPipelineChain.Visit(this);
             _sb.Append(' ').Append(GetTokenString(statementChain.Operator)).Append(' ');
             statementChain.RhsPipeline.Visit(this);
@@ -660,6 +682,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitPropertyMember(PropertyMemberAst propertyMemberAst)
         {
+            WriteCommentsToAstPosition(propertyMemberAst);
+
             if (propertyMemberAst.IsStatic)
             {
                 _sb.Append("static ");
@@ -688,12 +712,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitReturnStatement(ReturnStatementAst returnStatementAst)
         {
+            WriteCommentsToAstPosition(returnStatementAst);
             WriteControlFlowStatement("return", returnStatementAst.Pipeline);
             return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitScriptBlock(ScriptBlockAst scriptBlockAst)
         {
+            WriteCommentsToAstPosition(scriptBlockAst);
+
             if (scriptBlockAst.Parent != null)
             {
                 _sb.Append('{');
@@ -780,6 +807,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitStatementBlock(StatementBlockAst statementBlockAst)
         {
+            WriteCommentsToAstPosition(statementBlockAst);
             BeginBlock();
             WriteStatementBlock(statementBlockAst.Statements, statementBlockAst.Traps);
             EndBlock();
@@ -788,6 +816,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitStringConstantExpression(StringConstantExpressionAst stringConstantExpressionAst)
         {
+            WriteCommentsToAstPosition(stringConstantExpressionAst);
             switch (stringConstantExpressionAst.StringConstantType)
             {
                 case StringConstantType.BareWord:
@@ -819,6 +848,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitSubExpression(SubExpressionAst subExpressionAst)
         {
+            WriteCommentsToAstPosition(subExpressionAst);
             _sb.Append("$(");
             WriteStatementBlock(subExpressionAst.SubExpression.Statements, subExpressionAst.SubExpression.Traps);
             _sb.Append(')');
@@ -827,6 +857,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitSwitchStatement(SwitchStatementAst switchStatementAst)
         {
+            WriteCommentsToAstPosition(switchStatementAst);
+
             if (switchStatementAst.Label != null)
             {
                 _sb.Append(':').Append(switchStatementAst.Label).Append(' ');
@@ -868,6 +900,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 #if PS7
         public override AstVisitAction VisitTernaryExpression(TernaryExpressionAst ternaryExpressionAst)
         {
+            WriteCommentsToAstPosition(ternaryExpressionAst);
+
             ternaryExpressionAst.Condition.Visit(this);
             _sb.Append(" ? ");
             ternaryExpressionAst.IfTrue.Visit(this);
@@ -879,6 +913,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitThrowStatement(ThrowStatementAst throwStatementAst)
         {
+            WriteCommentsToAstPosition(throwStatementAst);
+
             WriteControlFlowStatement("throw", throwStatementAst.Pipeline);
 
             return AstVisitAction.SkipChildren;
@@ -886,6 +922,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitTrap(TrapStatementAst trapStatementAst)
         {
+            WriteCommentsToAstPosition(trapStatementAst);
+
             _sb.Append("trap");
 
             if (trapStatementAst.TrapType != null)
@@ -901,6 +939,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitTryStatement(TryStatementAst tryStatementAst)
         {
+            WriteCommentsToAstPosition(tryStatementAst);
+
             _sb.Append("try");
             tryStatementAst.Body.Visit(this);
 
@@ -925,6 +965,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitTypeConstraint(TypeConstraintAst typeConstraintAst)
         {
+            WriteCommentsToAstPosition(typeConstraintAst);
             _sb.Append('[');
             WriteTypeName(typeConstraintAst.TypeName);
             _sb.Append(']');
@@ -934,6 +975,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitTypeDefinition(TypeDefinitionAst typeDefinitionAst)
         {
+            WriteCommentsToAstPosition(typeDefinitionAst);
+
             if (typeDefinitionAst.IsClass)
             {
                 _sb.Append("class ");
@@ -1001,6 +1044,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitTypeExpression(TypeExpressionAst typeExpressionAst)
         {
+            WriteCommentsToAstPosition(typeExpressionAst);
             _sb.Append('[');
             WriteTypeName(typeExpressionAst.TypeName);
             _sb.Append(']');
@@ -1010,6 +1054,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitUnaryExpression(UnaryExpressionAst unaryExpressionAst)
         {
+            WriteCommentsToAstPosition(unaryExpressionAst);
+
             switch (unaryExpressionAst.TokenKind)
             {
                 case TokenKind.PlusPlus:
@@ -1045,12 +1091,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitUsingExpression(UsingExpressionAst usingExpressionAst)
         {
+            WriteCommentsToAstPosition(usingExpressionAst);
             _sb.Append("$using:").Append(((VariableExpressionAst)usingExpressionAst.SubExpression).VariablePath.UserPath);
             return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitUsingStatement(UsingStatementAst usingStatementAst)
         {
+            WriteCommentsToAstPosition(usingStatementAst);
+
             _sb.Append("using ");
 
             switch (usingStatementAst.UsingStatementKind)
@@ -1085,7 +1134,14 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
                 Intersperse(
                     usingStatementAst.ModuleSpecification.KeyValuePairs,
-                    (kvp) => { kvp.Item1.Visit(this); _sb.Append(" = "); kvp.Item2.Visit(this); },
+                    (kvp) =>
+                    {
+                        WriteCommentsToAstPosition(kvp.Item1);
+                        kvp.Item1.Visit(this);
+                        _sb.Append(" = ");
+                        WriteCommentsToAstPosition(kvp.Item2);
+                        kvp.Item2.Visit(this);
+                    },
                     () => { _sb.Append("; "); });
 
                 _sb.Append(" }");
@@ -1112,12 +1168,14 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public override AstVisitAction VisitVariableExpression(VariableExpressionAst variableExpressionAst)
         {
+            WriteCommentsToAstPosition(variableExpressionAst);
             _sb.Append(variableExpressionAst.Splatted ? '@' : '$').Append(variableExpressionAst.VariablePath.UserPath);
             return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitWhileStatement(WhileStatementAst whileStatementAst)
         {
+            WriteCommentsToAstPosition(whileStatementAst);
             _sb.Append("while (");
             whileStatementAst.Condition.Visit(this);
             _sb.Append(")");
@@ -1145,6 +1203,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 attribute.Visit(this);
             }
+
             parameter.Name.Visit(this);
 
             if (parameter.DefaultValue != null)
@@ -1416,6 +1475,26 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 writeSeparator();
                 writeObject(astObjects[i]);
+            }
+        }
+
+        private void WriteCommentsToAstPosition(Ast ast)
+        {
+            Token currToken = _tokens[_tokenIndex];
+            while (currToken.Extent.EndOffset < ast.Extent.StartOffset)
+            {
+                if (currToken.Kind == TokenKind.Comment)
+                {
+                    _sb.Append(currToken.Text);
+
+                    if (currToken.Text.StartsWith("#"))
+                    {
+                        Newline();
+                    }
+                }
+
+                _tokenIndex++;
+                currToken = _tokens[_tokenIndex];
             }
         }
 
@@ -1832,6 +1911,36 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
                 default:
                     throw new ArgumentException($"Unable to stringify token kind '{tokenKind}'");
+            }
+        }
+
+        private char GetStreamIndicator(RedirectionStream stream)
+        {
+            switch (stream)
+            {
+                case RedirectionStream.All:
+                    return '*';
+
+                case RedirectionStream.Debug:
+                    return '5';
+
+                case RedirectionStream.Error:
+                    return '2';
+
+                case RedirectionStream.Information:
+                    return '6';
+
+                case RedirectionStream.Output:
+                    return '1';
+
+                case RedirectionStream.Verbose:
+                    return '4';
+
+                case RedirectionStream.Warning:
+                    return '3';
+
+                default:
+                    throw new ArgumentException($"Unknown redirection stream: '{stream}'");
             }
         }
 
