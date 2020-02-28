@@ -26,15 +26,25 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                     public static Dictionary<string, object> Dict { get { return _store; } }
                 }
 
-                public class TestVault : SecretsManagementExtension
+                public class TestExtVault : SecretsManagementExtension
                 {
                     private Dictionary<string, object> _store = Store.Dict;
             
-                    public TestVault(string vaultName) : base(vaultName) { }
+                    public TestExtVault(string vaultName) : base(vaultName) { }
+
+                    public override bool TestVault(
+                        string vaultName,
+                        IReadOnlyDictionary<string, object> parameters,
+                        out Exception[] errors)
+                    {
+                        errors = null;
+                        return true;
+                    }
             
                     public override bool SetSecret(
                         string name,
                         object secret,
+                        string vaultName,
                         IReadOnlyDictionary<string, object> parameters,
                         out Exception error)
                     {
@@ -50,6 +60,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             
                     public override object GetSecret(
                         string name,
+                        string vaultName,
                         IReadOnlyDictionary<string, object> parameters,
                         out Exception error)
                     {
@@ -65,6 +76,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             
                     public override bool RemoveSecret(
                         string name,
+                        string vaultName,
                         IReadOnlyDictionary<string, object> parameters,
                         out Exception error)
                     {
@@ -78,13 +90,14 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                         return false;
                     }
             
-                    public override KeyValuePair<string, string>[] GetSecretInfo(
+                    public override SecretInformation[] GetSecretInfo(
                         string filter,
+                        string vaultName,
                         IReadOnlyDictionary<string, object> parameters,
                         out Exception error)
                     {
                         error = null;
-                        List<KeyValuePair<string, string>> list = new List<KeyValuePair<string, string>>(_store.Count);
+                        var list = new List<SecretInformation>(_store.Count);
                         foreach (var item in _store)
                         {
                             string typeName;
@@ -115,7 +128,11 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                                     break;
                             }
 
-                            list.Add(new KeyValuePair<string, string>(item.Key, typeName));
+                            list.Add(
+                                new SecretInformation(
+                                    item.Key,
+                                    typeName,
+                                    vaultName));
                         }
             
                         return list.ToArray();
@@ -151,6 +168,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             {
                 param (
                     [string] $Name,
+                    [string] $VaultName,
                     [hashtable] $AdditionalParameters
                 )
 
@@ -173,6 +191,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                 param (
                     [string] $Name,
                     [object] $Secret,
+                    [string] $VaultName,
                     [hashtable] $AdditionalParameters
                 )
 
@@ -183,6 +202,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             {
                 param (
                     [string] $Name,
+                    [string] $VaultName,
                     [hashtable] $AdditionalParameters
                 )
 
@@ -193,6 +213,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             {
                 param (
                     [string] $Filter,
+                    [string] $VaultName,
                     [hashtable] $AdditionalParameters
                 )
 
@@ -213,10 +234,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                         elseif ($secret -is [hashtable]) { "Hashtable" }
                         else { "Unknown" }
 
-                        Write-Output ([pscustomobject] @{
-                            Name = $key
-                            Value = $typeName
-                        })
+                        Write-Output ([Microsoft.PowerShell.SecretsManagement.SecretInformation]::new($key, $typeName, $VaultName))
                     }
                 }
             }

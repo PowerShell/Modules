@@ -357,7 +357,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             string modulePath)
         {
             // Get module information by loading it.
-            var results = PowerShellInvoker.InvokeScript(
+            var results = PowerShellInvoker.InvokeScript<PSModuleInfo>(
                 script: @"
                     param ([string] $ModulePath)
 
@@ -366,7 +366,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 args: new object[] { modulePath },
                 out Exception _);
             
-            return (results.Count == 1) ? results[0].BaseObject as PSModuleInfo : null;
+            return (results.Count == 1) ? results[0] : null;
         }
 
         private void StoreVaultParameters(
@@ -686,9 +686,9 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                 var extensionModule = GetExtensionVault(Vault);
                 WriteResults(
-                    extensionModule.VaultName,
                     extensionModule.InvokeGetSecretInfo(
                         filter: Name,
+                        vaultName: Vault,
                         cmdlet: this));
                 
                 return;
@@ -703,9 +703,9 @@ namespace Microsoft.PowerShell.SecretsManagement
                 try
                 {
                     WriteResults(
-                        extensionModule.VaultName,
                         extensionModule.InvokeGetSecretInfo(
                             filter: Name,
+                            vaultName: Vault,
                             cmdlet: this));
                 }
                 catch (Exception ex)
@@ -725,31 +725,30 @@ namespace Microsoft.PowerShell.SecretsManagement
         #region Private methods
 
         private void WriteResults(
-            string vaultName,
-            KeyValuePair<string, string>[] results,
+            SecretInformation[] results,
             bool filterSpecialLocalNames = false)
         {
             // Ensure each vaults results are sorted by secret name.
-            var sortedList = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var sortedList = new SortedDictionary<string, SecretInformation>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in results)
             {
                 if (filterSpecialLocalNames &&
-                    item.Key.StartsWith(RegisterSecretsVaultCommand.ScriptParamTag))
+                    item.Name.StartsWith(RegisterSecretsVaultCommand.ScriptParamTag))
                 {
                     continue;
                 }
 
                 sortedList.Add(
-                    key: item.Key,
-                    value: item.Value);
+                    key: item.Name,
+                    value: item);
             }
 
-            foreach (var item in sortedList)
+            foreach (var item in sortedList.Values)
             {
                 WritePSObject(
-                    name: item.Key,
-                    typeName: item.Value,
-                    vaultName: vaultName);
+                    name: item.Name,
+                    typeName: item.TypeName,
+                    vaultName: item.VaultName);
             }
         }
 
@@ -775,12 +774,11 @@ namespace Microsoft.PowerShell.SecretsManagement
             int errorCode = 0;
             if (LocalSecretStore.EnumerateObjectInfo(
                 filter: Name,
-                outObjectInfos: out KeyValuePair<string, string>[] outObjectInfos,
+                outSecretInfo: out SecretInformation[] outSecretInfo,
                 errorCode: ref errorCode))
             {
                 WriteResults(
-                    vaultName: RegisterSecretsVaultCommand.BuiltInLocalVault,
-                    results: outObjectInfos,
+                    results: outSecretInfo,
                     filterSpecialLocalNames: true);
             }
         }
@@ -854,6 +852,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 var extensionModule = GetExtensionVault(Vault);
                 var result = extensionModule.InvokeGetSecret(
                     name: Name,
+                    vaultName: Vault,
                     cmdlet: this);
 
                 if (result != null)
@@ -881,6 +880,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 {
                     var result = extensionModule.InvokeGetSecret(
                         name: Name,
+                        vaultName: extensionModule.VaultName,
                         cmdlet: this);
                         
                     if (result != null)
@@ -1062,6 +1062,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 {
                     var result = extensionModule.InvokeGetSecret(
                         name: Name,
+                        vaultName: Vault,
                         cmdlet: this);
 
                     if (result != null)
@@ -1081,6 +1082,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 extensionModule.InvokeSetSecret(
                     name: Name,
                     secret: secretToWrite,
+                    vaultName: Vault,
                     cmdlet: this);
                 
                 return;
@@ -1198,7 +1200,56 @@ namespace Microsoft.PowerShell.SecretsManagement
             var extensionModule = GetExtensionVault(Vault);
             extensionModule.InvokeRemoveSecret(
                 name: Name,
+                vaultName: Vault,
                 cmdlet: this);
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region Test-Vault
+
+    /// <summary>
+    /// Runs vault internal validation test.
+    /// </summary>
+    [Cmdlet(VerbsDiagnostic.Test, "Vault")]
+    public sealed class TestVaultCommand : SecretsCmdlet
+    {
+        #region Parameters
+
+        [Parameter(Position=1, Mandatory=true)]
+        [ValidateNotNullOrEmpty]
+        public string Vault { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            bool success;
+            if (Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+            {
+                // TODO: Add test for CredMan, Keyring, etc.
+                success = true;
+            }
+            else
+            {
+                var extensionModule = GetExtensionVault(Vault);
+                success = extensionModule.InvokeTestVault(
+                    vaultName: Vault,
+                    cmdlet: this);
+            }
+
+            var resultMessage = success ?
+                string.Format(CultureInfo.InvariantCulture, @"Vault {0} succeeded validation test", Vault) :
+                string.Format(CultureInfo.InvariantCulture, @"Vault {0} failed validation test", Vault);
+            WriteVerbose(resultMessage);
+
+            // Return boolean for test result
+            WriteObject(success);
         }
 
         #endregion
