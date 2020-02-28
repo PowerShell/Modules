@@ -349,6 +349,23 @@ namespace Microsoft.PowerShell.SecretsManagement
                 return false;
             }
 
+            // Test-Vault function
+            if (!moduleInfo.ExportedFunctions.ContainsKey("Test-Vault"))
+            {
+                error = new ItemNotFoundException("Test-Vault function not found.");
+                return false;
+            }
+            if (!funcInfo.Parameters.ContainsKey("VaultName"))
+            {
+                error = new ItemNotFoundException("Test-Vault VaultName parameter not found.");
+                return false;
+            }
+            if (!funcInfo.Parameters.ContainsKey("AdditionalParameters"))
+            {
+                error = new ItemNotFoundException("Test-Vault AdditionalParameters parameter not found.");
+                return false;
+            }
+
             error = null;
             return true;
         }
@@ -745,27 +762,8 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             foreach (var item in sortedList.Values)
             {
-                WritePSObject(
-                    name: item.Name,
-                    typeName: item.TypeName,
-                    vaultName: item.VaultName);
+                WriteObject(item);
             }
-        }
-
-        private void WritePSObject(
-            string name,
-            string typeName,
-            string vaultName)
-        {
-            var psObject = new PSObject();
-            psObject.Members.Add(
-                new PSNoteProperty("Name", name));
-            psObject.Members.Add(
-                new PSNoteProperty("Vault", vaultName));
-            psObject.Members.Add(
-                new PSNoteProperty("TypeName", typeName));
-
-            WriteObject(psObject);
         }
 
         private void SearchLocalStore(string name)

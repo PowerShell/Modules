@@ -1402,14 +1402,14 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <param name="name">Name under which secret will be stored.</param>
         /// <param name="secret">Secret to be stored.</param>
         /// <param name="vaultName">Name of registered vault.</param>
-        /// <param name="parameters">Optional additional parameters.</param>
+        /// <param name="additionalParameters">Optional additional parameters.</param>
         /// <param name="error">Optional exception object on failure.</param>
         /// <returns>True on success.</returns>
         public abstract bool SetSecret(
             string name,
             object secret,
             string vaultName,
-            IReadOnlyDictionary<string, object> parameters,
+            IReadOnlyDictionary<string, object> additionalParameters,
             out Exception error);
 
         /// <summary>
@@ -1417,13 +1417,13 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </summary>
         /// <param name="name">Name of the secret to retrieve.</param>
         /// <param name="vaultName">Name of registered vault.</param>
-        /// <param name="parameters">Optional additional parameters.</param>
+        /// <param name="additionalParameters">Optional additional parameters.</param>
         /// <param name="error">Optional exception object on failure.</param>
         /// <returns>Secret object retrieved from the vault.  Null returned if not found.</returns>
         public abstract object GetSecret(
             string name,
             string vaultName,
-            IReadOnlyDictionary<string, object> parameters,
+            IReadOnlyDictionary<string, object> additionalParameters,
             out Exception error);
         
         /// <summary>
@@ -1431,13 +1431,13 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </summary>
         /// <param name="name">Name of the secret to remove.</param>
         /// <param name="vaultName">Name of registered vault.</param>
-        /// <param name="parameters">Optional additional parameters.</param>
+        /// <param name="additionalParameters">Optional additional parameters.</param>
         /// <param name="error">Optional exception object on failure.</param>
         /// <returns>True on success.</returns>
         public abstract bool RemoveSecret(
             string name,
             string vaultName,
-            IReadOnlyDictionary<string, object> parameters,
+            IReadOnlyDictionary<string, object> additionalParameters,
             out Exception error);
 
         /// <summary>
@@ -1450,25 +1450,25 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// A null value, empty string, or "*" will return all vault secrets.
         /// </param>
         /// <param name="vaultName">Name of registered vault.</param>
-        /// <param name="parameters">Optional additional parameters.</param>
+        /// <param name="additionalParameters">Optional additional parameters.</param>
         /// <param name="error">Optional exception object on failure.</param>
         /// <returns>Array of SecretInformation objects.</returns>
         public abstract SecretInformation[] GetSecretInfo(
             string filter,
             string vaultName,
-            IReadOnlyDictionary<string, object> parameters,
+            IReadOnlyDictionary<string, object> additionalParameters,
             out Exception error);
 
         /// <summary>
         /// Validates operation of the registered vault extension. 
         /// </summary>
         /// <param name="vaultName">Name of registered vault.</param>
-        /// <param name="parameters">Optional parameters for validation.</param>
+        /// <param name="additionalParameters">Optional parameters for validation.</param>
         /// <param name="error">Optional exception object on failure.</param>
         /// <returns>True if extension is functioning.</returns>
         public abstract bool TestVault(
             string vaultName,
-            IReadOnlyDictionary<string, object> parameters,
+            IReadOnlyDictionary<string, object> additionalParameters,
             out Exception[] errors);
 
         #endregion
@@ -1785,7 +1785,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     name: name,
                     secret: secret,
                     vaultName: vaultName,
-                    parameters: parameters,
+                    additionalParameters: parameters,
                     out error);
             }
             catch (Exception ex)
@@ -1837,7 +1837,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 secret = _vaultExtentsion.Value.GetSecret(
                     name: name,
                     vaultName: vaultName,
-                    parameters: parameters,
+                    additionalParameters: parameters,
                     out error);
             }
             catch (Exception ex)
@@ -1876,7 +1876,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 success = _vaultExtentsion.Value.RemoveSecret(
                     name: name,
                     vaultName: vaultName,
-                    parameters: parameters,
+                    additionalParameters: parameters,
                     out error);
             }
             catch (Exception ex)
@@ -1928,7 +1928,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 results = _vaultExtentsion.Value.GetSecretInfo(
                     filter: filter,
                     vaultName: vaultName,
-                    parameters: parameters,
+                    additionalParameters: parameters,
                     out error);
             }
             catch (Exception ex)
@@ -1975,7 +1975,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             {
                 success = _vaultExtentsion.Value.TestVault(
                     vaultName: vaultName,
-                    parameters: parameters,
+                    additionalParameters: parameters,
                     errors: out errors);
             }
             catch (Exception ex)
