@@ -12,12 +12,12 @@ using Dbg = System.Diagnostics.Debug;
 
 namespace Microsoft.PowerShell.SecretsManagement
 {
-    #region SecretsVaultInfo
+    #region SecretVaultInfo
 
     /// <summary>
     /// Class that contains secret vault information.
     /// </summary>
-    public sealed class SecretsVaultInfo
+    public sealed class SecretVaultInfo
     {
         #region Parameters
 
@@ -42,12 +42,12 @@ namespace Microsoft.PowerShell.SecretsManagement
         public string VaultParametersName { get; }
 
         /// <summary>
-        /// Name of assembly implementing the SecretsManagement type.
+        /// Name of assembly implementing the SecretManagementExtension type.
         /// </summary>
         public string ImplementingTypeAssemblyName { get; }
 
         /// <summary>
-        /// Name of type that implements the SecretsManagement type.
+        /// Name of type that implements the SecretManagementExtension type.
         /// </summary>
         public string ImplementingTypeName { get; }
 
@@ -55,7 +55,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Constructor
 
-        internal SecretsVaultInfo(
+        internal SecretVaultInfo(
             string name,
             ExtensionVaultModule vaultInfo)
         {
@@ -67,7 +67,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             ImplementingTypeName = vaultInfo.ImplementingTypeName;
         }
 
-        internal SecretsVaultInfo(
+        internal SecretVaultInfo(
             string defaultVaultName)
         {
             Name = defaultVaultName;
@@ -82,26 +82,26 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Register-SecretsVault
+    #region Register-SecretVault
 
     /// <summary>
-    /// Cmdlet to register a remote secrets vaults provider module
+    /// Cmdlet to register a remote secret vaults provider module
     /// </summary>
-    [Cmdlet(VerbsLifecycle.Register, "SecretsVault", SupportsShouldProcess = true)]
-    public sealed class RegisterSecretsVaultCommand : PSCmdlet
+    [Cmdlet(VerbsLifecycle.Register, "SecretVault", SupportsShouldProcess = true)]
+    public sealed class RegisterSecretVaultCommand : PSCmdlet
     {
         #region Members
 
         internal const string ScriptParamTag = "_SPT_Parameters_";
         internal const string BuiltInLocalVault = "BuiltInLocalVault";
-        internal const string ImplementingModule = "SecretsManagementExtension";
+        internal const string ImplementingModule = "SecretManagementExtension";
 
         #endregion
 
         #region Parameters
 
         /// <summary>
-        /// Gets or sets a friendly name for the registered secrets vault.
+        /// Gets or sets a friendly name for the registered secret vault.
         /// The name must be unique.
         /// </summary>
         [Parameter(Position=0, Mandatory=true)]
@@ -118,7 +118,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// <summary>
         /// Gets or sets an optional Hashtable of parameters by name/value pairs.
         /// The hashtable is stored securely in the local store, and is made available to the 
-        /// SecretsManagementExtension implementing type or module script functions.
+        /// SecretManagementExtension implementing type or module script functions.
         /// </summary>
         [Parameter]
         public Hashtable VaultParameters { get; set; }
@@ -136,7 +136,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 ThrowTerminatingError(
                     new ErrorRecord(
                         new PSArgumentException(msg),
-                        "RegisterSecretsVaultInvalidVaultName",
+                        "RegisterSecretVaultInvalidVaultName",
                         ErrorCategory.InvalidArgument,
                         this));
             }
@@ -153,7 +153,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 ThrowTerminatingError(
                     new ErrorRecord(
                         new InvalidOperationException("Provided Name for vault is already being used."),
-                        "RegisterSecretsVaultInvalidVaultName",
+                        "RegisterSecretVaultInvalidVaultName",
                         ErrorCategory.InvalidArgument,
                         this));
             }
@@ -173,7 +173,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 ThrowTerminatingError(
                     new ErrorRecord(
                         new PSInvalidOperationException(msg),
-                        "RegisterSecretsVaultCantGetModuleInfo",
+                        "RegisterSecretVaultCantGetModuleInfo",
                         ErrorCategory.InvalidOperation,
                         this));
             }
@@ -181,7 +181,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             var modulePath = moduleInfo.Path;
             var dirPath = System.IO.File.Exists(modulePath) ? System.IO.Path.GetDirectoryName(modulePath) : modulePath;
 
-            // Check module required modules for implementing type of SecretsManagementExtension class.
+            // Check module required modules for implementing type of SecretManagementExtension class.
             Type implementingType = GetImplementingTypeFromRequiredAssemblies(moduleInfo);
 
             // Check if module supports implementing functions.
@@ -192,13 +192,13 @@ namespace Microsoft.PowerShell.SecretsManagement
             if (implementingType == null && !haveScriptFunctionImplementation)
             {
                 var invalidException = new PSInvalidOperationException(
-                    message: "Could not find a SecretsManagementExtension implementing type, or a valid implementing script module.",
+                    message: "Could not find a SecretManagementExtension implementing type, or a valid implementing script module.",
                     innerException: error);
 
                 ThrowTerminatingError(
                     new ErrorRecord(
                         invalidException,
-                        "RegisterSecretsVaultCantFindImplementingTypeOrScriptModule",
+                        "RegisterSecretVaultCantFindImplementingTypeOrScriptModule",
                         ErrorCategory.ObjectNotFound,
                         this));
             }
@@ -236,7 +236,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         private static Type GetImplementingTypeFromRequiredAssemblies(
             PSModuleInfo moduleInfo)
         {
-            var extensionType = typeof(Microsoft.PowerShell.SecretsManagement.SecretsManagementExtension);
+            var extensionType = typeof(Microsoft.PowerShell.SecretsManagement.SecretManagementExtension);
             foreach (var requiredAssembly in moduleInfo.RequiredAssemblies)
             {
                 var assemblyName = System.IO.Path.GetFileNameWithoutExtension(requiredAssembly);
@@ -262,7 +262,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             string dirPath,
             out Exception error)
         {
-            // An implementing module will be in a subfolder with module name 'SecretsManagementExtension',
+            // An implementing module will be in a subfolder with module name 'SecretManagementExtension',
             // and will export the four required functions: Set-Secret, Get-Secret, Remove-Secret, Get-SecretInfo.
             var implementingModulePath = System.IO.Path.Combine(dirPath, ImplementingModule);
             var moduleInfo = GetModuleInfo(implementingModulePath);
@@ -414,7 +414,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     ThrowTerminatingError(
                         new ErrorRecord(
                             new PSInvalidOperationException(msg),
-                            "RegisterSecretsVaultCannotSaveParameters",
+                            "RegisterSecretVaultCannotSaveParameters",
                             ErrorCategory.WriteError,
                             this));
                 }
@@ -431,21 +431,21 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Unregister-SecretsVault
+    #region Unregister-SecretVault
 
     /// <summary>
-    /// Cmdlet to unregister a secrets vault.
+    /// Cmdlet to unregister a secret vault.
     /// </summary>
-    [Cmdlet(VerbsLifecycle.Unregister, "SecretsVault", SupportsShouldProcess = true)]
-    public sealed class UnregisterSecretsVaultCommand : PSCmdlet
+    [Cmdlet(VerbsLifecycle.Unregister, "SecretVault", SupportsShouldProcess = true)]
+    public sealed class UnregisterSecretVaultCommand : PSCmdlet
     {
         #region Parameters
 
         private const string NameParameterSet = "NameParameterSet";
-        private const string SecretsVaultParameterSet = "SecretsVaultParameterSet";
+        private const string SecretVaultParameterSet = "SecretVaultParameterSet";
 
         /// <summary>
-        /// Gets or sets a name of the secrets vault to unregister.
+        /// Gets or sets a name of the secret vault to unregister.
         /// </summary>
         [Parameter(ParameterSetName = NameParameterSet,
                    Position = 0, 
@@ -453,13 +453,13 @@ namespace Microsoft.PowerShell.SecretsManagement
         [ValidateNotNullOrEmpty]
         public string Name { get; set; }
 
-        [Parameter(ParameterSetName = SecretsVaultParameterSet,
+        [Parameter(ParameterSetName = SecretVaultParameterSet,
                    Position = 0,
                    Mandatory = true,
                    ValueFromPipeline = true,
                    ValueFromPipelineByPropertyName = true)]
         [ValidateNotNull]
-        public SecretsVaultInfo SecretsVault { get; set; }
+        public SecretVaultInfo SecretVault { get; set; }
 
         #endregion
 
@@ -482,8 +482,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                     vaultName = Name;
                     break;
                 
-                case SecretsVaultParameterSet:
-                    vaultName = SecretsVault.Name;
+                case SecretVaultParameterSet:
+                    vaultName = SecretVault.Name;
                     break;
 
                 default:
@@ -492,16 +492,16 @@ namespace Microsoft.PowerShell.SecretsManagement
                     break;
             }
 
-            if (vaultName.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+            if (vaultName.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 var msg = string.Format(CultureInfo.InvariantCulture, 
                     "The {0} vault cannot be removed.", 
-                    RegisterSecretsVaultCommand.BuiltInLocalVault);
+                    RegisterSecretVaultCommand.BuiltInLocalVault);
 
                 WriteError(
                     new ErrorRecord(
                         new PSArgumentException(msg),
-                        "RegisterSecretsVaultInvalidVaultName",
+                        "RegisterSecretVaultInvalidVaultName",
                         ErrorCategory.InvalidArgument,
                         this));
 
@@ -512,18 +512,18 @@ namespace Microsoft.PowerShell.SecretsManagement
             if (removedVaultInfo == null)
             {
                 var msg = string.Format(CultureInfo.InvariantCulture,
-                    "Unable to find secrets vault {0} to unregister it.", vaultName);
+                    "Unable to find secret vault {0} to unregister it.", vaultName);
                 WriteError(
                     new ErrorRecord(
                         new ItemNotFoundException(msg),
-                        "UnregisterSecretsVaultObjectNotFound",
+                        "UnregisterSecretVaultObjectNotFound",
                         ErrorCategory.ObjectNotFound,
                         this));
 
                 return;
             }
 
-            // Remove any parameter secrets from built-in local store.
+            // Remove any parameter secret from built-in local store.
             RemoveParamSecrets(removedVaultInfo, ExtensionVaultModule.VaultParametersStr);
         }
 
@@ -549,7 +549,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         WriteError(
                             new ErrorRecord(
                                 new PSInvalidOperationException(msg),
-                                "UnregisterSecretsVaultRemoveScriptParametersFailed",
+                                "UnregisterSecretVaultRemoveScriptParametersFailed",
                                 ErrorCategory.InvalidOperation,
                                 this));
                     }
@@ -562,15 +562,9 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Set-VaultParameters
+    #region SecretCmdlet
 
-    // TODO: Implement.
-
-    #endregion
-
-    #region SecretsCmdlet
-
-    public abstract class SecretsCmdlet : PSCmdlet
+    public abstract class SecretCmdlet : PSCmdlet
     {
         /// <summary>
         /// Look up and return specified extension module by name.
@@ -599,15 +593,15 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Get-SecretsVault
+    #region Get-SecretVault
 
     /// <summary>
-    /// Cmdlet to return registered secret vaults as SecretsVaultInfo objects.
+    /// Cmdlet to return registered secret vaults as SecretVaultInfo objects.
     /// If no name is provided then all registered secret vaults will be returned.
     /// </summary>
-    [Cmdlet(VerbsCommon.Get, "SecretsVault")]
-    [OutputType(typeof(SecretsVaultInfo))]
-    public sealed class GetSecretsVaultCommand : SecretsCmdlet
+    [Cmdlet(VerbsCommon.Get, "SecretVault")]
+    [OutputType(typeof(SecretVaultInfo))]
+    public sealed class GetSecretVaultCommand : SecretCmdlet
     {
         #region Parameters
 
@@ -628,10 +622,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 WildcardOptions.IgnoreCase);
 
             // Always list the 'BuiltInLocalVault' first
-            if (namePattern.IsMatch(RegisterSecretsVaultCommand.BuiltInLocalVault))
+            if (namePattern.IsMatch(RegisterSecretVaultCommand.BuiltInLocalVault))
             {
                 WriteObject(
-                    new SecretsVaultInfo(RegisterSecretsVaultCommand.BuiltInLocalVault));
+                    new SecretVaultInfo(RegisterSecretVaultCommand.BuiltInLocalVault));
             }
 
             // Then list all extension vaults in sorted order.
@@ -643,7 +637,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     if (vaultExtensions.TryGetValue(vaultName, out ExtensionVaultModule extensionModule))
                     {
                         WriteObject(
-                            new SecretsVaultInfo(
+                            new SecretVaultInfo(
                                 vaultName,
                                 extensionModule));
                     }
@@ -665,12 +659,12 @@ namespace Microsoft.PowerShell.SecretsManagement
     /// </summary>
     [Cmdlet(VerbsCommon.Get, "SecretInfo")]
     [OutputType(typeof(PSObject))]
-    public sealed class GetSecretInfoCommand : SecretsCmdlet
+    public sealed class GetSecretInfoCommand : SecretCmdlet
     {
         #region Parameters
 
         /// <summary>
-        /// Gets or sets a name used to match and return secrets.
+        /// Gets or sets a name used to match and return secret information.
         /// </summary>
         [Parameter(Position=0)]
         public string Name { get; set; }
@@ -695,7 +689,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             // Search single vault, if provided.
             if (!string.IsNullOrEmpty(Vault))
             {
-                if (Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+                if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
                 {
                     SearchLocalStore(Name);
                     return;
@@ -750,7 +744,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             foreach (var item in results)
             {
                 if (filterSpecialLocalNames &&
-                    item.Name.StartsWith(RegisterSecretsVaultCommand.ScriptParamTag))
+                    item.Name.StartsWith(RegisterSecretVaultCommand.ScriptParamTag))
                 {
                     continue;
                 }
@@ -795,7 +789,7 @@ namespace Microsoft.PowerShell.SecretsManagement
     /// </summary>
     [Cmdlet(VerbsCommon.Get, "Secret")]
     [OutputType(typeof(object))]
-    public sealed class GetSecretCommand : SecretsCmdlet
+    public sealed class GetSecretCommand : SecretCmdlet
     {
         #region Parameters
 
@@ -838,7 +832,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             // Search single vault.
             if (!string.IsNullOrEmpty(Vault))
             {
-                if (Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+                if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
                 {
                     if (!SearchLocalStore(Name))
                     {
@@ -986,7 +980,7 @@ namespace Microsoft.PowerShell.SecretsManagement
     /// </summary>
     [Cmdlet(VerbsCommon.Set, "Secret", 
             DefaultParameterSetName = SecureStringParameterSet)]
-    public sealed class SetSecretCommand : SecretsCmdlet
+    public sealed class SetSecretCommand : SecretCmdlet
     {
         #region Members
 
@@ -1051,7 +1045,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
             // Add to specified vault.
             if (!string.IsNullOrEmpty(Vault) && 
-                !Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+                !Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 var extensionModule = GetExtensionVault(Vault);
                 
@@ -1125,7 +1119,7 @@ namespace Microsoft.PowerShell.SecretsManagement
             else
             {
                 WriteVerbose(
-                    string.Format("Secret {0} was successfully added to vault {1}.", Name, RegisterSecretsVaultCommand.BuiltInLocalVault));
+                    string.Format("Secret {0} was successfully added to vault {1}.", Name, RegisterSecretVaultCommand.BuiltInLocalVault));
             }
         }
 
@@ -1140,7 +1134,7 @@ namespace Microsoft.PowerShell.SecretsManagement
     /// Removes a secret by name from the local default vault.
     /// <summary>
     [Cmdlet(VerbsCommon.Remove, "Secret")]
-    public sealed class RemoveSecretCommand : SecretsCmdlet
+    public sealed class RemoveSecretCommand : SecretCmdlet
     {
         #region Parameters
 
@@ -1167,7 +1161,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         protected override void ProcessRecord()
         {
-            if (Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+            if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 // Remove from local built-in default vault.
                 int errorCode = 0;
@@ -1188,7 +1182,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                 else
                 {
                     WriteVerbose(
-                        string.Format("Secret {0} was successfully removed from vault {1}.", Name, RegisterSecretsVaultCommand.BuiltInLocalVault));
+                        string.Format("Secret {0} was successfully removed from vault {1}.", Name, RegisterSecretVaultCommand.BuiltInLocalVault));
                 }
 
                 return;
@@ -1213,7 +1207,7 @@ namespace Microsoft.PowerShell.SecretsManagement
     /// Runs vault internal validation test.
     /// </summary>
     [Cmdlet(VerbsDiagnostic.Test, "Vault")]
-    public sealed class TestVaultCommand : SecretsCmdlet
+    public sealed class TestVaultCommand : SecretCmdlet
     {
         #region Parameters
 
@@ -1228,7 +1222,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         protected override void EndProcessing()
         {
             bool success;
-            if (Vault.Equals(RegisterSecretsVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
+            if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 // TODO: Add test for CredMan, Keyring, etc.
                 success = true;

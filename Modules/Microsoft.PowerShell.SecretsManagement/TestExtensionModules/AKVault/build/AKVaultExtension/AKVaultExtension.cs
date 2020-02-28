@@ -14,7 +14,7 @@ namespace AKVaultExtension
 {
     #region AKVaultExtension
 
-    public sealed class AKVaultExtension : SecretsManagementExtension
+    public sealed class AKVaultExtension : SecretManagementExtension
     {
         #region Scripts
 
@@ -98,6 +98,7 @@ namespace AKVaultExtension
 
         public override object GetSecret(
             string name, 
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters, 
             out Exception error)
         {
@@ -123,6 +124,7 @@ namespace AKVaultExtension
         public override bool SetSecret(
             string name, 
             object secret, 
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters, 
             out Exception error)
         {
@@ -154,6 +156,7 @@ namespace AKVaultExtension
 
         public override bool RemoveSecret(
             string name, 
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters, 
             out Exception error)
         {
@@ -177,8 +180,9 @@ namespace AKVaultExtension
             return (error == null);
         }
 
-        public override KeyValuePair<string, string>[] GetSecretInfo(
+        public override SecretInformation[] GetSecretInfo(
             string filter,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
@@ -190,7 +194,7 @@ namespace AKVaultExtension
                 subscriptionId: subscriptionId,
                 error: out error))
             {
-                return new KeyValuePair<string, string>[0];
+                return new SecretInformation[0];
             }
 
             var results = PowerShellInvoker.InvokeScript(
@@ -198,18 +202,28 @@ namespace AKVaultExtension
                 args: new object[] { filter, azkVaultName },
                 error: out error);
 
-            var list = new List<KeyValuePair<string, string>>(results.Count);
+            var list = new List<SecretInformation>(results.Count);
             foreach (dynamic result in results)
             {
                 list.Add(
-                    new KeyValuePair<string, string>(
-                        key: result.Name,
-                        value: nameof(SupportedTypes.SecureString)));
+                    new SecretInformation(
+                        name: result.Name,
+                        typeName: nameof(SupportedTypes.SecureString),
+                        vaultName: vaultName));
             }
 
             return list.ToArray();
         }
 
+        public override bool TestVault(
+            string vaultName,
+            IReadOnlyDictionary<string, object> parameters,
+            out Exception[] errors)
+        {
+            errors = null;
+            return true;
+        }
+        
         #endregion
 
         #region Private methods

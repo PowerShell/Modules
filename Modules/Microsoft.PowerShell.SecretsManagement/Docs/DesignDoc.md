@@ -74,7 +74,7 @@ Validation checks are performed on each module before being registered.
 
 ## Extension vaults
 
-Vault extensions are PowerShell modules that provide implementations of four required functions:
+Vault extensions are PowerShell modules that provide implementations of five required functions:
 
 - SetSecret - Adds a secret to the vault
 
@@ -83,6 +83,8 @@ Vault extensions are PowerShell modules that provide implementations of four req
 - RemoveSecret - Removes a secret from the vault
 
 - GetSecretInfo - Returns information about one or more secrets (but not the secret itself)
+
+- TestVault - Tests extension vault functions and returns True or diagnostic errors
 
 The extension module can expose the above functions either through a C# class implementing an abstract type, or by publicly exporting script cmdlet functions.
 Each function implementation takes a set of parameter arguments needed for secret manipulation and error reporting.
@@ -106,43 +108,52 @@ The PowerShell module must include a 'RequiredAssemblies' entry in the module ma
 public abstract bool SetSecret(
     string name,
     object secret,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error);
 
 public abstract object GetSecret(
     string name,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error);
 
 public abstract bool RemoveSecret(
     string name,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error);
 
-public abstract KeyValuePair<string, string>[] GetSecretInfo(
+public abstract SecretInformation[] GetSecretInfo(
     string filter,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error);
+
+public abstract bool TestVault(
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
+    out Exception[] errors);
 ```
 
 When PowerShell loads the module, the required assembly will be loaded and the implementing type becomes available.
 
 ### PowerShell script implementation
 
-For a script implementation, the PowerShell module must include a subdirectory named 'SecretsManagementExtension' in the same directory containing the module manifest file.
-The SecretsManagementExtension subdirectory must contain PowerShell script module files named 'SecretsManagementExtension' that implements the required script functions.  
+For a script implementation, the PowerShell module must include a subdirectory named 'SecretManagementExtension' in the same directory containing the module manifest file.
+The SecretManagementExtension subdirectory must contain PowerShell script module files named 'SecretManagementExtension' that implements the required script functions.  
 
-SecretsManagementExtension.psd1
+SecretManagementExtension.psd1
 
 ```powershell
 @{
     ModuleVersion = '1.0'
-    RootModule = '.\SecretsManagementExtension.psm1'
-    FunctionsToExport = @('Set-Secret','Get-Secret','Remove-Secret','Get-SecretInfo')
+    RootModule = '.\SecretManagementExtension.psm1'
+    FunctionsToExport = @('Set-Secret','Get-Secret','Remove-Secret','Get-SecretInfo','Test-Vault')
 }
 ```
 
-SecretsManagementExtension.psm1
+SecretManagementExtension.psm1
 
 ```powershell
 function Set-Secret
@@ -150,6 +161,7 @@ function Set-Secret
     param (
         [string] $Name,
         [object] $Secret,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 }
@@ -158,6 +170,7 @@ function Get-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 }
@@ -166,6 +179,7 @@ function Remove-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 }
@@ -174,6 +188,15 @@ function Get-SecretInfo
 {
     param (
         [string] $Filter,
+        [string] $VaultName,
+        [hashtable] $AdditionalParameters
+    )
+}
+
+function Test-Vault
+{
+    param (
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 }
@@ -184,18 +207,20 @@ function Get-SecretInfo
 The following cmdlets are provided for vault extension registration.  
 
 ```powershell
-Register-SecretsVault
-Get-SecretsVault
-Unregister-SecretsVault
+Register-SecretVault
+Get-SecretVault
+Unregister-SecretVault
 ```
 
-`Register-SecretsVault` registers a PowerShell module as an extension vault for the current user context.
+`Register-SecretVault` registers a PowerShell module as an extension vault for the current user context.
 Validation is performed to ensure the module either provides the required binary with implementing type or the required script commands.
 If a dictionary of additional parameters is specified then it will be stored securely in the built-in local vault.  
 
-`Get-SecretsVault` returns a list of extension vaults currently registered in the user context.  
+`Get-SecretVault` returns a list of extension vaults currently registered in the user context.  
 
-`Unregister-SecretsVault` un-registers an extension vault.
+`Unregister-SecretVault` un-registers an extension vault.
+
+`Test-Vault` tests a registered extension vault functions and returns True if good.
 
 ## Secrets cmdlets
 

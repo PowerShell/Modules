@@ -197,8 +197,8 @@ namespace Microsoft.PowerShell.SecretsManagement
     {
         #region Members
 
-        private const string PSTag = "__PS_";
-        private const string PSHashtableTag = "__PSHT_";
+        private const string PSTag = "ps:";
+        private const string PSHashtableTag = "psht:";
         private const string ByteArrayType = "ByteArrayType";
         private const string StringType = "StringType";
         private const string SecureStringType = "SecureStringType";
@@ -381,40 +381,40 @@ namespace Microsoft.PowerShell.SecretsManagement
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretsManagementExtension.SupportedTypes.ByteArray),
-                                vaultName: RegisterSecretsVaultCommand.BuiltInLocalVault));
+                                typeName: nameof(SecretManagementExtension.SupportedTypes.ByteArray),
+                                vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
                     case StringType:
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretsManagementExtension.SupportedTypes.String),
-                                vaultName: RegisterSecretsVaultCommand.BuiltInLocalVault));
+                                typeName: nameof(SecretManagementExtension.SupportedTypes.String),
+                                vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
                     case SecureStringType:
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretsManagementExtension.SupportedTypes.SecureString),
-                                vaultName: RegisterSecretsVaultCommand.BuiltInLocalVault));
+                                typeName: nameof(SecretManagementExtension.SupportedTypes.SecureString),
+                                vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
                     case PSCredentialType:
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretsManagementExtension.SupportedTypes.PSCredential),
-                                vaultName: RegisterSecretsVaultCommand.BuiltInLocalVault));
+                                typeName: nameof(SecretManagementExtension.SupportedTypes.PSCredential),
+                                vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
                     case HashtableType:
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretsManagementExtension.SupportedTypes.Hashtable),
-                                vaultName: RegisterSecretsVaultCommand.BuiltInLocalVault));
+                                typeName: nameof(SecretManagementExtension.SupportedTypes.Hashtable),
+                                vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
                 }
 
@@ -1338,13 +1338,13 @@ namespace Microsoft.PowerShell.SecretsManagement
     #endregion
 #endif
 
-    #region SecretsManagementExtension class
+    #region SecretManagementExtension class
 
     /// <summary>
     /// Abstract class which SecretsManagement extension vault modules will implement
     /// to provide secret management functions for plugin local or remote vaults.
     /// </summary>
-    public abstract class SecretsManagementExtension
+    public abstract class SecretManagementExtension
     {
         #region Enums
 
@@ -1371,12 +1371,12 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         #region Constructor
 
-        private SecretsManagementExtension() { }
+        private SecretManagementExtension() { }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="SecretsManagementExtension"/> class.
+        /// Initializes a new instance of the <see cref="SecretManagementExtension"/> class.
         /// </summary>
-        public SecretsManagementExtension(string vaultName)
+        public SecretManagementExtension(string vaultName)
         {
             if (string.IsNullOrEmpty(vaultName))
             {
@@ -1555,7 +1555,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         internal const string ImplementingTypeStr = "ImplementingType";
         internal const string ImplementingFunctionsStr = "ImplementingFunctions";
 
-        private Lazy<SecretsManagementExtension> _vaultExtentsion;
+        private Lazy<SecretManagementExtension> _vaultExtentsion;
         
         #endregion
 
@@ -1577,12 +1577,12 @@ namespace Microsoft.PowerShell.SecretsManagement
         public string ModulePath { get; }
 
         /// <summary>
-        /// Name of the assembly implementing the SecretsManagementExtension derived type.
+        /// Name of the assembly implementing the SecretManagementExtension derived type.
         /// </summary>
         public string ImplementingTypeAssemblyName { get; }
 
         /// <summary>
-        /// Name of type implementing SecretsManagementExtension abstract class.
+        /// Name of type implementing SecretManagementExtension abstract class.
         /// </summary>
         public string ImplementingTypeName { get; }
 
@@ -1639,7 +1639,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
         private void Init()
         {
-            _vaultExtentsion = new Lazy<SecretsManagementExtension>(() => {
+            _vaultExtentsion = new Lazy<SecretManagementExtension>(() => {
                 foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
                 {
                     if (assembly.GetName().Name.Equals(ImplementingTypeAssemblyName, StringComparison.OrdinalIgnoreCase))
@@ -1647,8 +1647,8 @@ namespace Microsoft.PowerShell.SecretsManagement
                         var implementingType = assembly.GetType(ImplementingTypeName);
                         if (implementingType != null)
                         {
-                            // SecretsManagementExtension abstract class constructor takes a single 'vaultName' parameter.
-                            return (SecretsManagementExtension) Activator.CreateInstance(
+                            // SecretManagementExtension abstract class constructor takes a single 'vaultName' parameter.
+                            return (SecretManagementExtension) Activator.CreateInstance(
                                 type: implementingType,
                                 args: new object[] { VaultName });
                         }
@@ -1657,7 +1657,7 @@ namespace Microsoft.PowerShell.SecretsManagement
 
                 throw new InvalidOperationException(
                     string.Format(CultureInfo.InvariantCulture, 
-                        "Unable to find and create SecretsManagementExtension type instance from vault {0}", VaultName));
+                        "Unable to find and create SecretManagementExtension type instance from vault {0}", VaultName));
             });
         }
 
@@ -2030,10 +2030,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
-            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript<bool>(
                 script: RunCommandScript,
-                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, SetSecretCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretVaultCommand.ImplementingModule, SetSecretCmd, parameters },
                 error: out Exception error);
 
             bool success = results.Count > 0 ? results[0] : false;
@@ -2066,10 +2066,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
-            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript<object>(
                 script: RunCommandScript,
-                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, GetSecretCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretVaultCommand.ImplementingModule, GetSecretCmd, parameters },
                 error: out Exception error);
             
             if (error != null)
@@ -2097,10 +2097,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
-            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript<bool>(
                 script: RunCommandScript,
-                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, RemoveSecretCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretVaultCommand.ImplementingModule, RemoveSecretCmd, parameters },
                 error: out Exception error);
 
             bool success = results.Count > 0 ? results[0] : false;
@@ -2133,10 +2133,10 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
-            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretVaultCommand.ImplementingModule);
             var results = PowerShellInvoker.InvokeScript<SecretInformation>(
                 script: RunCommandScript,
-                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, GetSecretInfoCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretVaultCommand.ImplementingModule, GetSecretInfoCmd, parameters },
                 error: out Exception error);
             
             if (error != null)
@@ -2164,11 +2164,11 @@ namespace Microsoft.PowerShell.SecretsManagement
                 { "AdditionalParameters", additionalParameters }
             };
 
-            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretsVaultCommand.ImplementingModule);
+            var implementingModulePath = System.IO.Path.Combine(ModulePath, RegisterSecretVaultCommand.ImplementingModule);
             ErrorRecord[] errors = null;
             var results = PowerShellInvoker.InvokeScript<bool>(
                 script: RunCommandScript,
-                args: new object[] { implementingModulePath, RegisterSecretsVaultCommand.ImplementingModule, TestVaultCmd, parameters },
+                args: new object[] { implementingModulePath, RegisterSecretVaultCommand.ImplementingModule, TestVaultCmd, parameters },
                 errors: out errors);
             
             foreach (var error in errors)

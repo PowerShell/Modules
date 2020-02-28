@@ -16,6 +16,7 @@ function Get-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -38,6 +39,7 @@ function Set-Secret
     param (
         [string] $Name,
         [object] $Secret,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -56,6 +58,7 @@ function Remove-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -74,6 +77,7 @@ function Get-SecretInfo
 {
     param(
         [string] $Filter,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -91,10 +95,22 @@ function Get-SecretInfo
                     elseif ($secret -is [PSCredential]) { "PSCredential" }
                     elseif ($secret -is [hashtable]) { "Hashtable" }
                     else { "Unknown" }
-
-        Write-Output ([pscustomobject] @{
-            Name = $secretName
-            Value = $typeName
-        })
+        
+        Write-Output (
+            [Microsoft.PowerShell.SecretsManagement.SecretInformation]::new(
+                $secretName,
+                $typeName,
+                $VaultName)
+        )
     }
+}
+
+function Test-Vault
+{
+    param (
+        [string] $VaultName,
+        [hashtable] $AdditionalParameters
+    )
+
+    return $true
 }

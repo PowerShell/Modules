@@ -26,7 +26,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                     public static Dictionary<string, object> Dict { get { return _store; } }
                 }
 
-                public class TestExtVault : SecretsManagementExtension
+                public class TestExtVault : SecretManagementExtension
                 {
                     private Dictionary<string, object> _store = Store.Dict;
             
@@ -282,7 +282,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         $script:scriptModuleFilePath = Join-Path $scriptModulePath "${scriptModuleName}.psd1"
         "@{ ModuleVersion = '1.0' }" | Out-File -FilePath $script:scriptModuleFilePath
 
-        $implementingModuleName = "SecretsManagementExtension"
+        $implementingModuleName = "SecretManagementExtension"
         $implementingModulePath = Join-Path $scriptModulePath $implementingModuleName
         New-Item -ItemType Directory $implementingModulePath -Force
         $implementingManifestFilePath = Join-Path $implementingModulePath "${implementingModuleName}.psd1"
@@ -300,14 +300,14 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
     AfterAll {
 
-        Unregister-SecretsVault -Name BinaryTestVault -ErrorAction Ignore
-        Unregister-SecretsVault -Name ScriptTestVault -ErrorAction Ignore
+        Unregister-SecretVault -Name BinaryTestVault -ErrorAction Ignore
+        Unregister-SecretVault -Name ScriptTestVault -ErrorAction Ignore
     }
 
     Context "Built-in local store errors" {
 
         It "Should throw error when registering the reserved 'BuiltInLocalVault' vault name" {
-            { Register-SecretsVault -Name BuiltInLocalVault -Module 'c:\' } | Should -Throw -ErrorId 'RegisterSecretsVaultInvalidVaultName'
+            { Register-SecretVault -Name BuiltInLocalVault -Module 'c:\' } | Should -Throw -ErrorId 'RegisterSecretVaultInvalidVaultName'
         }
     }
 
@@ -715,7 +715,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         It "Should register the binary vault extension successfullyy but with invalid parameters" {
             $additionalParameters = @{ Hello = "There" }
-            { Register-SecretsVault -Name BinaryTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
+            { Register-SecretVault -Name BinaryTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
         }
 
@@ -725,19 +725,19 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         }
 
         It "Should successfully unregister binary vault extension" {
-            { Unregister-SecretsVault -Name BinaryTestVault -ErrorVariable err } | Should -Not -Throw
+            { Unregister-SecretVault -Name BinaryTestVault -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
         }
 
         It "Should register the binary vault extension successfully" {
             $additionalParameters = @{ AccessToken = "SecretAT"; SubscriptionId = "1234567890" }
-            { Register-SecretsVault -Name BinaryTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
+            { Register-SecretVault -Name BinaryTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
         }
 
         It "Should throw error when registering existing registered vault extension" {
             $additionalParameters = @{ AccessToken = "SecretAT"; SubscriptionId = "1234567890" }
-            { Register-SecretsVault -Name BinaryTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters } | Should -Throw -ErrorId 'RegisterSecretsVaultInvalidVaultName'
+            { Register-SecretVault -Name BinaryTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters } | Should -Throw -ErrorId 'RegisterSecretVaultInvalidVaultName'
         }
 
         It "Verifies Test-Vault succeeds" {
@@ -784,7 +784,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
 
         It "Should register the script vault extension successfully but with invalid parameters" {
             $additionalParameters = @{ Hello = "There" }
-            { Register-SecretsVault -Name ScriptTestVault -ModuleName $script:scriptModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
+            { Register-SecretVault -Name ScriptTestVault -ModuleName $script:scriptModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
         }
 
@@ -794,19 +794,19 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         }
 
         It "Should successfully unregister script vault extension" {
-            { Unregister-SecretsVault -Name ScriptTestVault -ErrorVariable err } | Should -Not -Throw
+            { Unregister-SecretVault -Name ScriptTestVault -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
         }
 
         It "Should register the script vault extension successfully" {
             $additionalParameters = @{ AccessToken = "SecretAT"; SubscriptionId = "1234567890" }
-            { Register-SecretsVault -Name ScriptTestVault -ModuleName $script:scriptModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
+            { Register-SecretVault -Name ScriptTestVault -ModuleName $script:scriptModuleFilePath -VaultParameters $additionalParameters -ErrorVariable err } | Should -Not -Throw
             $err.Count | Should -Be 0
         }
 
         It "Should throw error when registering existing registered vault extension" {
             $additionalParameters = @{ AccessToken = "SecretAT"; SubscriptionId = "1234567890" }
-            { Register-SecretsVault -Name ScriptTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters } | Should -Throw -ErrorId 'RegisterSecretsVaultInvalidVaultName'
+            { Register-SecretVault -Name ScriptTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters } | Should -Throw -ErrorId 'RegisterSecretVaultInvalidVaultName'
         }
 
         It "Verifies Test-Vault succeeds" {
