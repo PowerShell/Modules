@@ -31,7 +31,14 @@ function Get-Secret
         return
     }
 
-    return Import-Clixml -Path $filePath
+    $secret = Import-Clixml -Path $filePath
+
+    if ($secret.GetType().IsArray)
+    {
+        return @(,$secret)
+    }
+
+    return $secret
 }
 
 function Set-Secret
