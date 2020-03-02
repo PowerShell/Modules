@@ -115,41 +115,41 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                         var list = new List<SecretInformation>(_store.Count);
                         foreach (var item in _store)
                         {
-                            string typeName;
+                            SecretType type;
                             switch (item.Value)
                             {
                                 case byte[] blob:
-                                    typeName = "ByteArray";
+                                    type = SecretType.ByteArray;
                                     break;
 
                                 case string str:
-                                    typeName = "String";
+                                    type = SecretType.String;
                                     break;
 
                                 case System.Security.SecureString sstr:
-                                    typeName = "SecureString";
+                                    type = SecretType.SecureString;
                                     break;
                                 
                                 case PSCredential cred:
-                                    typeName = "PSCredential";
+                                    type = SecretType.PSCredential;
                                     break;
 
                                 case Hashtable ht:
-                                    typeName = "Hashtable";
+                                    type = SecretType.Hashtable;
                                     break;
 
                                 default:
-                                    typeName = string.Empty;
+                                    type = SecretType.Unknown;
                                     break;
                             }
 
                             list.Add(
                                 new SecretInformation(
                                     item.Key,
-                                    typeName,
+                                    type,
                                     vaultName));
                         }
-            
+
                         return list.ToArray();
                     }
                 }
@@ -242,19 +242,19 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
                     if ($pattern.IsMatch($key))
                     {
                         $secret = $script:store[$key]
-                        $typeName = if ($secret -is [byte[]]) { "ByteArray" }
-                        elseif ($secret -is [string]) { "String" }
-                        elseif ($secret -is [securestring]) { "SecureString" }
-                        elseif ($secret -is [PSCredential]) { "PSCredential" }
-                        elseif ($secret -is [hashtable]) { "Hashtable" }
-                        else { "Unknown" }
+                        $type = if ($secret -is [byte[]]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::ByteArray }
+                        elseif ($secret -is [string]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::String }
+                        elseif ($secret -is [securestring]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::SecureString }
+                        elseif ($secret -is [PSCredential]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::PSCredential }
+                        elseif ($secret -is [hashtable]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::Hashtable }
+                        else { [Microsoft.PowerShell.SecretsManagement.SecretType]::Unknown }
 
-                        Write-Output ([Microsoft.PowerShell.SecretsManagement.SecretInformation]::new($key, $typeName, $VaultName))
+                        Write-Output ([Microsoft.PowerShell.SecretsManagement.SecretInformation]::new($key, $type, $VaultName))
                     }
                 }
             }
 
-            function Test-Vault
+            function Test-SecretVault
             {
                 param (
                     [string] $VaultName,
@@ -290,7 +290,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         @{{
             ModuleVersion = '1.0'
             RootModule = '{0}'
-            FunctionsToExport = @('Set-Secret','Get-Secret','Remove-Secret','Get-SecretInfo','Test-Vault')
+            FunctionsToExport = @('Set-Secret','Get-Secret','Remove-Secret','Get-SecretInfo','Test-SecretVault')
         }}
         " -f $implementingModuleName
         $manifestInfo | Out-File -FilePath $implementingManifestFilePath
@@ -334,7 +334,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $blobInfo = Get-SecretInfo -Name __Test_ByteArray_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
             $blobInfo.Name | Should -BeExactly "__Test_ByteArray_"
-            $blobInfo.TypeName | Should -BeExactly "ByteArray"
+            $blobInfo.Type | Should -BeExactly "ByteArray"
             $blobInfo.VaultName | Should -BeExactly "BuiltInLocalVault"
         }
 
@@ -366,7 +366,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $strInfo = Get-SecretInfo -Name __Test_String_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
             $strInfo.Name | Should -BeExactly "__Test_String_"
-            $strInfo.TypeName | Should -BeExactly "String"
+            $strInfo.Type | Should -BeExactly "String"
             $strInfo.VaultName | Should -BeExactly "BuiltInLocalVault"
         }
 
@@ -397,7 +397,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $ssInfo = Get-SecretInfo -Name __Test_SecureString_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
             $ssInfo.Name | Should -BeExactly "__Test_SecureString_"
-            $ssInfo.TypeName | Should -BeExactly "SecureString"
+            $ssInfo.Type | Should -BeExactly "SecureString"
             $ssInfo.VaultName | Should -BeExactly "BuiltInLocalVault"
         }
 
@@ -445,7 +445,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
         It "Verifies PSCredential enumeration from local store" {
             $credInfo = Get-SecretInfo -Name __Test_PSCredential_ -Vault BuiltInLocalVault -ErrorVariable err
             $credInfo.Name | Should -BeExactly "__Test_PSCredential_"
-            $credInfo.TypeName | Should -BeExactly "PSCredential"
+            $credInfo.Type | Should -BeExactly "PSCredential"
             $credInfo.VaultName | Should -BeExactly "BuiltInLocalVault"
         }
 
@@ -486,7 +486,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $htInfo = Get-SecretInfo -Name __Test_Hashtable_ -Vault BuiltInLocalVault -ErrorVariable err
             $err.Count | Should -Be 0
             $htInfo.Name | Should -BeExactly "__Test_Hashtable_"
-            $htInfo.TypeName | Should -BeExactly "Hashtable"
+            $htInfo.Type | Should -BeExactly "Hashtable"
             $htInfo.VaultName | Should -BeExactly "BuiltInLocalVault"
         }
 
@@ -521,7 +521,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $blobInfo = Get-SecretInfo -Name BinVaultBlob -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
             $blobInfo.Name | Should -BeExactly "BinVaultBlob"
-            $blobInfo.TypeName | Should -BeExactly "ByteArray"
+            $blobInfo.Type | Should -BeExactly "ByteArray"
             $blobInfo.VaultName | Should -BeExactly $VaultName
         }
 
@@ -559,7 +559,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $strInfo = Get-SecretInfo -Name BinVaultStr -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
             $strInfo.Name | Should -BeExactly "BinVaultStr"
-            $strInfo.TypeName | Should -BeExactly "String"
+            $strInfo.Type | Should -BeExactly "String"
             $strInfo.VaultName | Should -BeExactly $VaultName
         }
 
@@ -597,7 +597,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $ssInfo = Get-SecretInfo -Name BinVaultSecureStr -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
             $ssInfo.Name | Should -BeExactly "BinVaultSecureStr"
-            $ssInfo.TypeName | Should -BeExactly "SecureString"
+            $ssInfo.Type | Should -BeExactly "SecureString"
             $ssInfo.VaultName | Should -BeExactly $VaultName
         }
 
@@ -652,7 +652,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $credInfo = Get-SecretInfo -Name BinVaultCred -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
             $credInfo.Name | Should -BeExactly "BinVaultCred"
-            $credInfo.TypeName | Should -BeExactly "PSCredential"
+            $credInfo.Type | Should -BeExactly "PSCredential"
             $credInfo.VaultName | Should -BeExactly $VaultName
         }
 
@@ -699,7 +699,7 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $htInfo = Get-SecretInfo -Name BinVaultHT -Vault $VaultName -ErrorVariable err
             $err.Count | Should -Be 0
             $htInfo.Name | Should -BeExactly "BinVaultHT"
-            $htInfo.TypeName | Should -BeExactly "Hashtable"
+            $htInfo.Type | Should -BeExactly "Hashtable"
             $htInfo.VaultName | Should -BeExactly $VaultName
         }
 
@@ -719,8 +719,8 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $err.Count | Should -Be 0
         }
 
-        It "Verifies Test-Vault fails with errors" {
-            Test-Vault -Vault BinaryTestVault -ErrorVariable err -ErrorAction SilentlyContinue | Should -BeFalse
+        It "Verifies Test-SecretVault fails with errors" {
+            Test-SecretVault -Vault BinaryTestVault -ErrorVariable err -ErrorAction SilentlyContinue | Should -BeFalse
             $err.Count | Should -Be 2
         }
 
@@ -740,8 +740,8 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             { Register-SecretVault -Name BinaryTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters } | Should -Throw -ErrorId 'RegisterSecretVaultInvalidVaultName'
         }
 
-        It "Verifies Test-Vault succeeds" {
-            Test-Vault -Vault BinaryTestVault | Should -BeTrue
+        It "Verifies Test-SecretVault succeeds" {
+            Test-SecretVault -Vault BinaryTestVault | Should -BeTrue
         }
     }
 
@@ -788,8 +788,8 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             $err.Count | Should -Be 0
         }
 
-        It "Verifies Test-Vault fails with errors" {
-            Test-Vault -Vault ScriptTestVault -ErrorVariable err -ErrorAction SilentlyContinue | Should -BeFalse
+        It "Verifies Test-SecretVault fails with errors" {
+            Test-SecretVault -Vault ScriptTestVault -ErrorVariable err -ErrorAction SilentlyContinue | Should -BeFalse
             $err.Count | Should -Be 2
         }
 
@@ -809,8 +809,8 @@ Describe "Test Microsoft.PowerShell.SecretsManagement module" -tags CI {
             { Register-SecretVault -Name ScriptTestVault -ModuleName $script:binModuleFilePath -VaultParameters $additionalParameters } | Should -Throw -ErrorId 'RegisterSecretVaultInvalidVaultName'
         }
 
-        It "Verifies Test-Vault succeeds" {
-            Test-Vault -Vault BinaryTestVault | Should -BeTrue
+        It "Verifies Test-SecretVault succeeds" {
+            Test-SecretVault -Vault BinaryTestVault | Should -BeTrue
         }
     }
 

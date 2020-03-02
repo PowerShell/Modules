@@ -381,7 +381,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretManagementExtension.SupportedTypes.ByteArray),
+                                type: SecretType.ByteArray,
                                 vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
@@ -389,7 +389,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretManagementExtension.SupportedTypes.String),
+                                type: SecretType.String,
                                 vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
@@ -397,7 +397,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretManagementExtension.SupportedTypes.SecureString),
+                                type: SecretType.SecureString,
                                 vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
@@ -405,7 +405,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretManagementExtension.SupportedTypes.PSCredential),
+                                type: SecretType.PSCredential,
                                 vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
 
@@ -413,7 +413,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                         outList.Add(
                             new SecretInformation(
                                 name: RemoveTag(item.Name),
-                                typeName: nameof(SecretManagementExtension.SupportedTypes.Hashtable),
+                                type: SecretType.Hashtable,
                                 vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
                 }
@@ -1338,6 +1338,23 @@ namespace Microsoft.PowerShell.SecretsManagement
     #endregion
 #endif
 
+    #region Enums
+
+    /// <summary>
+    /// Supported secret types
+    /// </summary>
+    public enum SecretType
+    {
+        Unknown = 0,
+        ByteArray,
+        String,
+        SecureString,
+        PSCredential,
+        Hashtable
+    };
+
+    #endregion
+
     #region SecretManagementExtension class
 
     /// <summary>
@@ -1492,9 +1509,9 @@ namespace Microsoft.PowerShell.SecretsManagement
         }
 
         /// <summary>
-        /// Gets or sets the type name of the secret.
+        /// Gets or sets the object type of the secret.
         /// </summary>
-        public string TypeName
+        public SecretType Type
         {
             get;
             private set;
@@ -1518,11 +1535,11 @@ namespace Microsoft.PowerShell.SecretsManagement
         /// </summary>
         public SecretInformation(
             string name,
-            string typeName,
+            SecretType type,
             string vaultName)
         {
             Name = name;
-            TypeName = typeName;
+            Type = type;
             VaultName = vaultName;
         }
 
@@ -1548,7 +1565,7 @@ namespace Microsoft.PowerShell.SecretsManagement
         internal const string GetSecretInfoCmd = "Get-SecretInfo";
         internal const string SetSecretCmd = "Set-Secret";
         internal const string RemoveSecretCmd = "Remove-Secret";
-        internal const string TestVaultCmd = "Test-Vault";
+        internal const string TestVaultCmd = "Test-SecretVault";
         internal const string ModuleNameStr = "ModuleName";
         internal const string ModulePathStr = "ModulePath";
         internal const string VaultParametersStr = "VaultParameters";

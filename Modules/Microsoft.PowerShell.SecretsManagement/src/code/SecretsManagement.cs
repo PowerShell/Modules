@@ -349,20 +349,20 @@ namespace Microsoft.PowerShell.SecretsManagement
                 return false;
             }
 
-            // Test-Vault function
-            if (!moduleInfo.ExportedFunctions.ContainsKey("Test-Vault"))
+            // Test-SecretVault function
+            if (!moduleInfo.ExportedFunctions.ContainsKey("Test-SecretVault"))
             {
-                error = new ItemNotFoundException("Test-Vault function not found.");
+                error = new ItemNotFoundException("Test-SecretVault function not found.");
                 return false;
             }
             if (!funcInfo.Parameters.ContainsKey("VaultName"))
             {
-                error = new ItemNotFoundException("Test-Vault VaultName parameter not found.");
+                error = new ItemNotFoundException("Test-SecretVault VaultName parameter not found.");
                 return false;
             }
             if (!funcInfo.Parameters.ContainsKey("AdditionalParameters"))
             {
-                error = new ItemNotFoundException("Test-Vault AdditionalParameters parameter not found.");
+                error = new ItemNotFoundException("Test-SecretVault AdditionalParameters parameter not found.");
                 return false;
             }
 
@@ -716,7 +716,7 @@ namespace Microsoft.PowerShell.SecretsManagement
                     WriteResults(
                         extensionModule.InvokeGetSecretInfo(
                             filter: Name,
-                            vaultName: Vault,
+                            vaultName: extensionModule.VaultName,
                             cmdlet: this));
                 }
                 catch (Exception ex)
@@ -1201,13 +1201,13 @@ namespace Microsoft.PowerShell.SecretsManagement
 
     #endregion
 
-    #region Test-Vault
+    #region Test-SecretVault
 
     /// <summary>
     /// Runs vault internal validation test.
     /// </summary>
-    [Cmdlet(VerbsDiagnostic.Test, "Vault")]
-    public sealed class TestVaultCommand : SecretCmdlet
+    [Cmdlet(VerbsDiagnostic.Test, "SecretVault")]
+    public sealed class TestSecretVaultCommand : SecretCmdlet
     {
         #region Parameters
 

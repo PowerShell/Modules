@@ -95,14 +95,14 @@ function Get-SecretInfo
             Write-Output (
                 [Microsoft.PowerShell.SecretsManagement.SecretInformation]::new(
                     $vaultSecretInfo.Name,
-                    "SecureString",
+                    [Microsoft.PowerShell.SecretsManagement.SecretType]::SecureString,
                     $VaultName)
             )
         }
     }
 }
 
-function Test-Vault
+function Test-SecretVault
 {
     param (
         [string] $VaultName,
