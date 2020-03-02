@@ -16,6 +16,7 @@ function Get-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -30,7 +31,14 @@ function Get-Secret
         return
     }
 
-    return Import-Clixml -Path $filePath
+    $secret = Import-Clixml -Path $filePath
+
+    if ($secret.GetType().IsArray)
+    {
+        return @(,$secret)
+    }
+
+    return $secret
 }
 
 function Set-Secret
@@ -38,6 +46,7 @@ function Set-Secret
     param (
         [string] $Name,
         [object] $Secret,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -56,6 +65,7 @@ function Remove-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -74,6 +84,7 @@ function Get-SecretInfo
 {
     param(
         [string] $Filter,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -85,16 +96,28 @@ function Get-SecretInfo
     {
         $secretName = [System.IO.Path]::GetFileNameWithoutExtension((Split-Path -Path $file -Leaf))
         $secret = Import-Clixml -Path $file.FullName
-        $typeName = if ($secret -is [byte[]]) { "ByteArray" }
-                    elseif ($secret -is [string]) { "String" }
-                    elseif ($secret -is [securestring]) { "SecureString" }
-                    elseif ($secret -is [PSCredential]) { "PSCredential" }
-                    elseif ($secret -is [hashtable]) { "Hashtable" }
-                    else { "Unknown" }
-
-        Write-Output ([pscustomobject] @{
-            Name = $secretName
-            Value = $typeName
-        })
+        $type = if ($secret.gettype().IsArray) { [Microsoft.PowerShell.SecretsManagement.SecretType]::ByteArray }
+                    elseif ($secret -is [string]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::String }
+                    elseif ($secret -is [securestring]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::SecureString }
+                    elseif ($secret -is [PSCredential]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::PSCredential }
+                    elseif ($secret -is [hashtable]) { [Microsoft.PowerShell.SecretsManagement.SecretType]::Hashtable }
+                    else { [Microsoft.PowerShell.SecretsManagement.SecretType]::Unknown }
+        
+        Write-Output (
+            [Microsoft.PowerShell.SecretsManagement.SecretInformation]::new(
+                $secretName,
+                $type,
+                $VaultName)
+        )
     }
+}
+
+function Test-SecretVault
+{
+    param (
+        [string] $VaultName,
+        [hashtable] $AdditionalParameters
+    )
+
+    return $true
 }

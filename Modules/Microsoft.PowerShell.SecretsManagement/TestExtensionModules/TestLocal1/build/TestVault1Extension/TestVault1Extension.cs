@@ -15,7 +15,7 @@ namespace TestVault1Extension
 
     #region TestVault1Extension
 
-    public class TestVault1Extension : SecretsManagementExtension
+    public class TestVault1Extension : SecretManagementExtension
     {
         #region Constructors
 
@@ -32,6 +32,7 @@ namespace TestVault1Extension
         public override bool SetSecret(
             string name,
             object secret,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
@@ -52,6 +53,7 @@ namespace TestVault1Extension
 
         public override object GetSecret(
             string name,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
@@ -67,6 +69,7 @@ namespace TestVault1Extension
 
         public override bool RemoveSecret(
             string name,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
@@ -85,8 +88,9 @@ namespace TestVault1Extension
             return true;
         }
 
-        public override KeyValuePair<string, string>[] GetSecretInfo(
+        public override SecretInformation[] GetSecretInfo(
             string filter,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
@@ -97,7 +101,7 @@ namespace TestVault1Extension
 
             error = dataStreams.Error.Count > 0 ? dataStreams.Error[0].Exception : null;
 
-            var list = new List<KeyValuePair<string, string>>(results.Count);
+            var list = new List<SecretInformation>(results.Count);
             foreach (dynamic result in results)
             {
                 string typeName;
@@ -130,12 +134,22 @@ namespace TestVault1Extension
                 }
 
                 list.Add(
-                    new KeyValuePair<string, string>(
-                        key: result.Name,
-                        value: typeName));
+                    new SecretInformation(
+                        name: result.Name,
+                        typeName: typeName,
+                        vaultName: vaultName));
             }
 
             return list.ToArray();
+        }
+
+        public override bool TestVault(
+            string vaultName,
+            IReadOnlyDictionary<string, object> parameters,
+            out Exception[] errors)
+        {
+            errors = null;
+            return true;
         }
 
         #endregion

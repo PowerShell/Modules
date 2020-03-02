@@ -16,9 +16,10 @@ The module exposes cmdlets for for accessing and manipulating secrets, and also 
 
 Registering extension vaults:
 
-- Register-SecretsVault
-- Get-SecretsVault
-- Unregister-SecretsVault
+- Register-SecretVault
+- Get-SecretVault
+- Unregister-SecretVault
+- Test-Vault
 
 Accessing secrets:
 
@@ -47,7 +48,7 @@ Removes a single secret object from the extension vault (optional).
 
 ### Binary module vault extension
 
-This is a PowerShell module with a manifest file (.psd1) that specifies a managed assembly that implements the SecretsManagementExtension abstract class.
+This is a PowerShell module with a manifest file (.psd1) that specifies a managed assembly that implements the SecretManagementExtension abstract class.
 An example of such a module has been provided in the `TestExtensionModules\AKVault\` directory.
 This binary module uses the Azure `Az.Accounts` and `Az.KeyVault` PowerShell modules to add/remove/retrieve SecureString secrets from an Azure KeyVault resource.
 See the `TestExtensionModules\AKVault\build\AKVaultExtension\AKVaultExtension.cs` source file for details.
@@ -56,67 +57,78 @@ Since the Secrets Management can't know if the `-VaultParameters` contain secret
 An example registration of a working vault extension using this module is:
 
 ```powershell
-Register-SecretsVault -Name AzKeyVault -ModuleName AKVault -VaultParameters @{ AZKVaultName = 'MyAzKeyVault'; SubscriptionId = 'f3bc301d-40b7-4bcb-8e66-b1b238200f02' }
+Register-SecretVault -Name AzKeyVault -ModuleName AKVault -VaultParameters @{ AZKVaultName = 'MyAzKeyVault'; SubscriptionId = 'f3bc301d-40b7-4bcb-8e66-b1b238200f02' }
 ```
 
-This module basically implements the four required methods as a C# class implementing the abstract SecretsManagementExtension class (again see the `AKVaultExtension.cs` source file for details).
+This module basically implements the five required methods as a C# class implementing the abstract SecretManagementExtension class (again see the `AKVaultExtension.cs` source file for details).
 
 ```C#
 public override object GetSecret(
     string name,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error)
 { }
 
 public override KeyValuePair<string, string>[] GetSecretInfo(
     string filter,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error)
 { }
 
 public override bool SetSecret(
     string name,
     object secret,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error)
 { }
 
 public override bool RemoveSecret(
     string name,
-    IReadOnlyDictionary<string, object> parameters,
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
     out Exception error)
+{ }
+
+public override bool TestVault(
+    string vaultName,
+    IReadOnlyDictionary<string, object> additionalParameters,
+    out Exception[] errors)
 { }
 ```
 
 ### Script module vault extension
 
-NOTE: This example applies to Microsoft.PowerShell.SecretsManagement module version 0.2.0 or higher.  
+NOTE: This example applies to Microsoft.PowerShell.SecretManagement module version 0.2.0 or higher.  
 
 This is a PowerShell module that implements the required four methods as PowerShell script functions.
-The actual module containing the script implementation is in a subdirectory of the vault module and named `SecretsManagementExtension`.
+The actual module containing the script implementation is in a subdirectory of the vault module and named `SecretManagementExtension`.
 This is done to "hide" the implementing module from PowerShell command discovery, which prevents the implementing module script functions from being exposed to the user on the command line.
 An example of such a module has been provided in the `TestExtensionModules\AKVaultScript\` directory.  
 
 This module provides the same Azure KeyVault extension functions as the binary module above, but does so with PowerShell script functions rather than a managed binary implementing type.
-It consists of an SecretsManagementExtension module that implements the script functions defined in the `SecretsManagementExtension.psm1` file, and exports the four required functions in the `SecretsManagementExtension.psd1` manifest file.  
+It consists of an SecretManagementExtension module that implements the script functions defined in the `SecretManagementExtension.psm1` file, and exports the four required functions in the `SecretManagementExtension.psd1` manifest file.  
 
-SecretsManagementExtension.psd1
+SecretManagementExtension.psd1
 
 ```powershell
 @{
     ModuleVersion = '1.0'
-    RootModule = '.\SecretsManagementExtension.psm1'
-    FunctionsToExport = @('Set-Secret','Get-Secret','Remove-Secret','Get-SecretInfo')
+    RootModule = '.\SecretManagementExtension.psm1'
+    FunctionsToExport = @('Set-Secret','Get-Secret','Remove-Secret','Get-SecretInfo','Test-Vault')
 }
 ```
 
-SecretsManagementExtension.psm1
+SecretManagementExtension.psm1
 
 ```powershell
 function Get-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -126,6 +138,7 @@ function Get-SecretInfo
 {
     param (
         [string] $Filter,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -136,6 +149,7 @@ function Set-Secret
     param (
         [string] $Name,
         [object] $Secret,
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -145,6 +159,16 @@ function Remove-Secret
 {
     param (
         [string] $Name,
+        [string] $VaultName,
+        [hashtable] $AdditionalParameters
+    )
+
+}
+
+function Test-Vault
+{
+    param (
+        [string] $VaultName,
         [hashtable] $AdditionalParameters
     )
 
@@ -160,17 +184,20 @@ Both of the binary and script modules implement the four functions in similar wa
 The method/functions take the same parameters, including optional additional parameters, and return the same object(s).
 
 - Get-Secret  
-Input Parameters: Name, AdditionalParameters  
+Input Parameters: Name, VaultName, AdditionalParameters  
 Output: Secret object
 - Get-SecretInfo  
-Input Parameters: Filter, AdditionalParameters  
+Input Parameters: Filter, VaultName, AdditionalParameters  
 Output: PSObject with two properties: Name, TypeName
 - Set-Secret  
-Input Parameters: Name, Secret, AdditionalParameters  
+Input Parameters: Name, Secret, VaultName, AdditionalParameters  
 Output: True on success, False otherwise
 - Remove-Secret  
-Input Parameters: Name, AdditionalParameters  
+Input Parameters: Name, VaultName, AdditionalParameters  
 Output: True on success, False otherwise
+- Test-Vault
+Input Parameters VaultName, AdditionalParameters
+Output: True for valid vault, False otherwise
 
 You have to be careful with PowerShell script functions, because there are many ways for objects to be added to the output pipeline and the Secrets Management module expects very specific output objects from the functions.
 Make sure your script implementation does not inadvertently insert spurious objects to the pipeline, which will confuse the Secrets Management module.
