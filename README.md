@@ -13,7 +13,7 @@ Modules should not take code dependencies across this repo and should rely on ob
 
 Cmdlets for configuration of remoting, particularly SSH based.
 
-### Microsoft.PowerShell.SecretsManagement
+### Microsoft.PowerShell.SecretManagement
 
 Provides secure and convenient cmdlets to store and retrieve secrets.
 
