@@ -30,6 +30,10 @@ param (
     [string] $BuildFramework = "netstandard2.0"
 )
 
+if ( ! ( Get-Module -ErrorAction SilentlyContinue PSPackageProject) ) {
+    Install-Module PSPackageProject
+}
+
 $config = Get-PSPackageProjectConfiguration -ConfigPath $PSScriptRoot
 
 $script:ModuleName = $config.ModuleName
@@ -45,10 +49,6 @@ $script:BuildConfiguration = $BuildConfiguration
 $script:BuildFramework = $BuildFramework
 
 . "$PSScriptRoot\doBuild.ps1"
-
-if ( ! ( Get-Module -ErrorAction SilentlyContinue PSPackageProject) ) {
-    Install-Module PSPackageProject
-}
 
 # The latest DotNet (3.1.1) is needed to perform binary build.
 $dotNetCmd = Get-Command -Name dotNet -ErrorAction SilentlyContinue
