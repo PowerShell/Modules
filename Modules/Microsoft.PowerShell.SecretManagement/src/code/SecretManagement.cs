@@ -401,7 +401,7 @@ namespace Microsoft.PowerShell.SecretManagement
 
                 // Store parameters in built-in local secure vault.
                 int errorCode = 0;
-                if (!LocalSecretStore.WriteObject(
+                if (!LocalSecretStore.Instance.WriteObject(
                     name: parametersName,
                     parameters,
                     ref errorCode))
@@ -409,7 +409,7 @@ namespace Microsoft.PowerShell.SecretManagement
                     var msg = string.Format(
                         CultureInfo.InvariantCulture, 
                         "Unable to register vault extension because writing script parameters to the built-in local store failed with error: {0}",
-                        LocalSecretStore.GetErrorMessage(errorCode));
+                        LocalSecretStore.Instance.GetErrorMessage(errorCode));
 
                     ThrowTerminatingError(
                         new ErrorRecord(
@@ -541,9 +541,9 @@ namespace Microsoft.PowerShell.SecretManagement
                 if (!string.IsNullOrEmpty(parametersName))
                 {
                     int errorCode = 0;
-                    if (!LocalSecretStore.DeleteObject(parametersName, ref errorCode))
+                    if (!LocalSecretStore.Instance.DeleteObject(parametersName, ref errorCode))
                     {
-                        var errorMessage = LocalSecretStore.GetErrorMessage(errorCode);
+                        var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                         var msg = string.Format(CultureInfo.InvariantCulture, 
                             "Removal of vault info script parameters {0} failed with error {1}", parametersName, errorMessage);
                         WriteError(
@@ -764,7 +764,7 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             // Search through the built-in local vault.
             int errorCode = 0;
-            if (LocalSecretStore.EnumerateObjectInfo(
+            if (LocalSecretStore.Instance.EnumerateObjectInfo(
                 filter: Name,
                 outSecretInfo: out SecretInformation[] outSecretInfo,
                 errorCode: ref errorCode))
@@ -955,7 +955,7 @@ namespace Microsoft.PowerShell.SecretManagement
         private bool SearchLocalStore(string name)
         {
             int errorCode = 0;
-            if (LocalSecretStore.ReadObject(
+            if (LocalSecretStore.Instance.ReadObject(
                 name: name,
                 outObject: out object outObject,
                 ref errorCode))
@@ -1084,7 +1084,7 @@ namespace Microsoft.PowerShell.SecretManagement
             int errorCode = 0;
             if (NoClobber)
             {
-                if (LocalSecretStore.ReadObject(
+                if (LocalSecretStore.Instance.ReadObject(
                     name: Name,
                     out object _,
                     ref errorCode))
@@ -1101,12 +1101,12 @@ namespace Microsoft.PowerShell.SecretManagement
             }
 
             errorCode = 0;
-            if (!LocalSecretStore.WriteObject(
+            if (!LocalSecretStore.Instance.WriteObject(
                 name: Name,
                 objectToWrite: secretToWrite,
                 ref errorCode))
             {
-                var errorMessage = LocalSecretStore.GetErrorMessage(errorCode);
+                var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                 var msg = string.Format(CultureInfo.InvariantCulture, 
                     "The secret could not be written to the local default vault.  Error: {0}", errorMessage);
                 ThrowTerminatingError(
@@ -1165,11 +1165,11 @@ namespace Microsoft.PowerShell.SecretManagement
             {
                 // Remove from local built-in default vault.
                 int errorCode = 0;
-                if (!LocalSecretStore.DeleteObject(
+                if (!LocalSecretStore.Instance.DeleteObject(
                     name: Name,
                     ref errorCode))
                 {
-                    var errorMessage = LocalSecretStore.GetErrorMessage(errorCode);
+                    var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                     var msg = string.Format(CultureInfo.InvariantCulture, 
                         "The secret could not be removed from the local default vault. Error: {0}", errorMessage);
                     ThrowTerminatingError(

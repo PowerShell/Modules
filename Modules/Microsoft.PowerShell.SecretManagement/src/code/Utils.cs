@@ -16,6 +16,116 @@ using Dbg = System.Diagnostics.Debug;
 
 namespace Microsoft.PowerShell.SecretManagement
 {
+    #region BaseLocalSecretStore
+
+    internal abstract class BaseLocalSecretStore
+    {
+        #region Members
+
+        protected const string PSTag = "ps:";
+        protected const string PSHashtableTag = "psht:";
+        protected const string ByteArrayType = "ByteArrayType";
+        protected const string StringType = "StringType";
+        protected const string SecureStringType = "SecureStringType";
+        protected const string PSCredentialType = "CredentialType";
+        protected const string HashtableType = "HashtableType";
+
+        protected const int MaxHashtableItemCount = 20;
+
+        #endregion
+
+        #region Static Constructor
+
+        static BaseLocalSecretStore()
+        {
+            Instance = new LocalSecretStore();
+        }
+
+        #endregion
+    
+        #region Properties
+
+        public static BaseLocalSecretStore Instance
+        {
+            get;
+            private set;
+        }
+
+        #endregion
+
+        #region Abstract methods
+
+        //
+        // Vault methods currently support the following types
+        //
+        // byte[] (blob)
+        // string
+        // SecureString
+        // PSCredential
+        // Hashtable
+        //   Dictionary<string, object>
+        //   ,where object type is: byte[], string, SecureString, Credential
+        //
+
+        /// <summary>
+        /// Writes an object to the local secret vault for the current logged on user.
+        /// </summary>
+        /// <param name="name">Name of object to write.</param>
+        /// <param name="objectToWrite">Object to write to vault.</param>
+        /// <param name="errorCode">Error code or zero.</param>
+        /// <returns>True on successful write.</returns>
+        public abstract bool WriteObject<T>(
+            string name,
+            T objectToWrite,
+            ref int errorCode);
+        
+        /// <summary>
+        /// Reads an object from the local secret vault for the current logged on user.
+        /// </summary>
+        /// <param name="name">Name of object to read from vault.</param>
+        /// <param name="outObject">Object read from vault.</param>
+        /// <param name="errorCode">Error code or zero.</param>
+        /// <returns>True on successful read.</returns>
+        public abstract bool ReadObject(
+            string name,
+            out object outObject,
+            ref int errorCode);
+
+        /// <summary>
+        /// Enumerate objects in the vault based on the current user and filter parameter, 
+        /// and return information about each object but not the object itself.
+        /// </summary>
+        /// <param name="filter">Search string for object enumeration.</param>
+        /// <param name="outSecretInfo">Array of SecretInformation objects.</param>
+        /// <param name="errorCode">Error code or zero.</param>
+        /// <returns>True when objects are found.</returns>
+        public abstract bool EnumerateObjectInfo(
+            string filter,
+            out SecretInformation[] outSecretInfo,
+            ref int errorCode);
+
+        /// <summary>
+        /// Delete vault object.
+        /// </summary>
+        /// <param name="name">Name of vault item to delete.</param>
+        /// <param name="errorCode">Error code or zero.</param>
+        /// <returns>True if object successfully deleted.</returns>
+        public abstract bool DeleteObject(
+            string name,
+            ref int errorCode);
+
+        /// <summary>
+        /// Returns an error message based on provided error code.
+        /// </summary>
+        /// <param name="errorCode">Error code.</param>
+        /// <returns>Error message.</returns>
+        public abstract string GetErrorMessage(int errorCode);
+
+        #endregion
+    }
+
+    #endregion
+
 #if !UNIX
     #region CredMan
 
@@ -193,44 +303,11 @@ namespace Microsoft.PowerShell.SecretManagement
     /// <summary>
     /// Default local secret store
     /// </summary>
-    internal static class LocalSecretStore
+    internal class LocalSecretStore : BaseLocalSecretStore
     {
-        #region Members
+        #region Public method overrides
 
-        private const string PSTag = "ps:";
-        private const string PSHashtableTag = "psht:";
-        private const string ByteArrayType = "ByteArrayType";
-        private const string StringType = "StringType";
-        private const string SecureStringType = "SecureStringType";
-        private const string PSCredentialType = "CredentialType";
-        private const string HashtableType = "HashtableType";
-
-        private const int MaxHashtableItemCount = 20;
-
-        #endregion
-
-        #region Public methods
-
-        //
-        // Vault methods currently only support the following types
-        //
-        // byte[] (blob)
-        // string
-        // SecureString
-        // PSCredential
-        // Hashtable
-        //   Dictionary<string, object>
-        //   ,where object type is: byte[], string, SecureString, Credential
-        //
-
-        /// <summary>
-        /// Writes an object to the local secret vault for the current logged on user.
-        /// </summary>
-        /// <param name="name">Name of object to write.</param>
-        /// <param name="objectToWrite">Object to write to vault.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True on successful write.</returns>
-        public static bool WriteObject<T>(
+        public override bool WriteObject<T>(
             string name,
             T objectToWrite,
             ref int errorCode)
@@ -284,14 +361,7 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
-        /// <summary>
-        /// Reads an object from the local secret vault for the current logged on user.
-        /// </summary>
-        /// <param name="name">Name of object to read from vault.</param>
-        /// <param name="outObject">Object read from vault.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True on successful read.</returns>
-        public static bool ReadObject(
+        public override bool ReadObject(
             string name,
             out object outObject,
             ref int errorCode)
@@ -350,15 +420,7 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
-        /// <summary>
-        /// Enumerate objects in the vault based on the current user and filter parameter, 
-        /// and return information about each object but not the object itself.
-        /// </summary>
-        /// <param name="filter">Search string for object enumeration.</param>
-        /// <param name="outSecretInfo">Array of SecretInformation objects.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True when objects are found.</returns>
-        public static bool EnumerateObjectInfo(
+        public override bool EnumerateObjectInfo(
             string filter,
             out SecretInformation[] outSecretInfo,
             ref int errorCode)
@@ -425,105 +487,8 @@ namespace Microsoft.PowerShell.SecretManagement
             outSecretInfo = outList.ToArray();
             return true;
         }
-        
-        /// <summary>
-        /// Enumerate objects in the vault, based on the filter string, for the current user.
-        /// <summary>
-        /// <param name="filter">String with '*' wildcard that determines which objects to return.</param>
-        /// <param name="all">Lists all objects in store without the prepended tag.</param>
-        /// <param name="outObjects">Array of key/value pairs for each returned object.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True when objects are found and returned.</returns>
-        internal static bool EnumerateObjects(
-            string filter,
-            bool all,
-            out KeyValuePair<string, object>[] outObjects,
-            ref int errorCode)
-        {
-            if (!all)
-            {
-                filter = PrependTag(filter);
-            }
 
-            if (!EnumerateBlobs(
-                filter,
-                out EnumeratedBlob[] outBlobs,
-                ref errorCode))
-            {
-                outObjects = null;
-                return false;
-            }
-
-            var outList = new List<KeyValuePair<string, object>>(outBlobs.Length);
-            foreach (var item in outBlobs)
-            {
-                switch (item.TypeName)
-                {
-                    case ByteArrayType:
-                        outList.Add(
-                            new KeyValuePair<string, object>(
-                                RemoveTag(item.Name),
-                                item.Data));
-                        break;
-
-                    case StringType:
-                        outList.Add(
-                            new KeyValuePair<string, object>(
-                                RemoveTag(item.Name),
-                                Encoding.UTF8.GetString(item.Data)));
-                        break;
-
-                    case SecureStringType:
-                        if (GetSecureStringFromData(
-                            item.Data,
-                            out SecureString outSecureString))
-                        {
-                            outList.Add(
-                                new KeyValuePair<string, object>(
-                                    RemoveTag(item.Name),
-                                    outSecureString));
-                        }
-                        break;
-
-                    case PSCredentialType:
-                        if (ReadPSCredential(
-                            item.Data,
-                            out object credential))
-                        {
-                            outList.Add(
-                                new KeyValuePair<string, object>(
-                                    RemoveTag(item.Name),
-                                    credential));
-                        }
-                        break;
-
-                    case HashtableType:
-                        if (ReadHashtable(
-                            item.Name,
-                            item.Data,
-                            out object hashtable,
-                            ref errorCode))
-                        {
-                            outList.Add(
-                                new KeyValuePair<string, object>(
-                                    RemoveTag(item.Name),
-                                    hashtable));
-                        }
-                        break;
-                }
-            }
-
-            outObjects = outList.ToArray();
-            return true;
-        }
-
-        /// <summary>
-        /// Delete vault object.
-        /// </summary>
-        /// <param name="name">Name of vault item to delete.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True if object successfully deleted.</returns>
-        public static bool DeleteObject(
+        public override bool DeleteObject(
             string name,
             ref int errorCode)
         {
@@ -552,12 +517,7 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
-        /// <summary>
-        /// Returns an error message based on provided error code.
-        /// </summary>
-        /// <param name="errorCode">Error code.</param>
-        /// <returns>Error message.</returns>
-        public static string GetErrorMessage(int errorCode)
+        public override string GetErrorMessage(int errorCode)
         {
             switch ((uint)errorCode)
             {
@@ -2205,7 +2165,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (!string.IsNullOrEmpty(VaultParametersName))
             {
                 int errorCode = 0;
-                if (LocalSecretStore.ReadObject(
+                if (LocalSecretStore.Instance.ReadObject(
                     name: VaultParametersName,
                     outObject: out object outObject,
                     ref errorCode))
@@ -2225,7 +2185,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (!string.IsNullOrEmpty(paramsName))
             {
                 int errorCode = 0;
-                if (LocalSecretStore.ReadObject(
+                if (LocalSecretStore.Instance.ReadObject(
                     paramsName,
                     out object outObject,
                     ref errorCode))
