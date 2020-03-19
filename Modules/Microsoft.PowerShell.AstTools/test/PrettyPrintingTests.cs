@@ -1,18 +1,18 @@
+using Microsoft.PowerShell.AstTools;
 using System;
 using System.IO;
 using System.Management.Automation.Language;
-using Microsoft.PowerShell.PrettyPrinter;
 using Xunit;
 
 namespace test
 {
     public class PrettyPrinterTests
     {
-        private readonly PrettyPrinter _pp;
+        private readonly StringPrettyPrinter _pp;
 
         public PrettyPrinterTests()
         {
-            _pp = new PrettyPrinter();
+            _pp = new StringPrettyPrinter();
         }
 
         [Theory()]
