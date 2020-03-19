@@ -1,21 +1,74 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Management.Automation;
+using System.IO;
 using System.Management.Automation.Language;
 using System.Text;
 
-namespace Microsoft.PowerShell.PrettyPrinter
+namespace Microsoft.PowerShell.AstTools
 {
-    public class PrettyPrinter
+    public class StringPrettyPrinter : PrettyPrinter
+    {
+        private string _result;
+
+        private StringWriter _sw;
+
+        public string PrettyPrintInput(string input)
+        {
+            DoPrettyPrintInput(input);
+            return _result;
+        }
+
+        public string PrettyPrintFile(string filePath)
+        {
+            DoPrettyPrintFile(filePath);
+            return _result;
+        }
+
+        public string PrettyPrintAst(Ast ast, IReadOnlyList<Token> tokens)
+        {
+            DoPrettyPrintAst(ast, tokens);
+            return _result;
+        }
+
+        protected override TextWriter CreateTextWriter()
+        {
+            _sw = new StringWriter();
+            return _sw;
+        }
+
+        protected override void DoPostPrintAction()
+        {
+            _result = _sw.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Prints a PowerShell AST based on its structure rather than text captured in extents.
+    /// </summary>
+    public abstract class PrettyPrinter
     {
         private readonly PrettyPrintingVisitor _visitor;
 
-        public PrettyPrinter()
+        /// <summary>
+        /// Create a new pretty printer for use.
+        /// </summary>
+        protected PrettyPrinter()
         {
             _visitor = new PrettyPrintingVisitor();
         }
 
-        public string PrettyPrintInput(string input)
+        protected abstract TextWriter CreateTextWriter();
+
+        protected virtual void DoPostPrintAction()
+        {
+        }
+
+        /// <summary>
+        /// Pretty print a PowerShell script provided as an inline string.
+        /// </summary>
+        /// <param name="input">The inline PowerShell script to parse and pretty print.</param>
+        /// <returns>A pretty-printed version of the given PowerShell script.</returns>
+        protected void DoPrettyPrintInput(string input)
         {
             Ast ast = Parser.ParseInput(input, out Token[] tokens, out ParseError[] errors);
 
@@ -24,10 +77,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 throw new ParseException(errors);
             }
 
-            return _visitor.Run(ast, tokens);
+            DoPrettyPrintAst(ast, tokens);
         }
 
-        public string PrettyPrintFile(string filePath)
+        /// <summary>
+        /// Pretty print the contents of a PowerShell file.
+        /// </summary>
+        /// <param name="filePath">The path of the PowerShell file to pretty print.</param>
+        /// <returns>The pretty-printed file contents.</returns>
+        protected void DoPrettyPrintFile(string filePath)
         {
             Ast ast = Parser.ParseFile(filePath, out Token[] tokens, out ParseError[] errors);
 
@@ -36,13 +94,28 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 throw new ParseException(errors);
             }
 
-            return _visitor.Run(ast, tokens);
+            DoPrettyPrintAst(ast, tokens);
+        }
+
+        /// <summary>
+        /// Pretty print a given PowerShell AST.
+        /// </summary>
+        /// <param name="ast">The PowerShell AST to print.</param>
+        /// <param name="tokens">The token array generated when the AST was parsed. May be null.</param>
+        /// <returns>The pretty-printed PowerShell AST in string form.</returns>
+        protected void DoPrettyPrintAst(Ast ast, IReadOnlyList<Token> tokens)
+        {
+            using (TextWriter textWriter = CreateTextWriter())
+            {
+                _visitor.Run(textWriter, ast, tokens);
+                DoPostPrintAction();
+            }
         }
     }
 
     internal class PrettyPrintingVisitor : AstVisitor2
     {
-        private readonly StringBuilder _sb;
+        private TextWriter _tw;
 
         private readonly string _newline;
 
@@ -58,29 +131,31 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         public PrettyPrintingVisitor()
         {
-            _sb = new StringBuilder();
             _newline = "\n";
             _indentStr = "    ";
             _comma = ", ";
             _indent = 0;
         }
 
-        public string Run(Ast ast, Token[] tokens)
+        public void Run(
+            TextWriter tw,
+            Ast ast,
+            IReadOnlyList<Token> tokens)
         {
-            _sb.Clear();
+            _tw = tw;
             _tokenIndex = 0;
             _tokens = tokens;
             ast.Visit(this);
-            return _sb.ToString();
+            _tw = null;
         }
 
         public override AstVisitAction VisitArrayExpression(ArrayExpressionAst arrayExpressionAst)
         {
             WriteCommentsToAstPosition(arrayExpressionAst);
 
-            _sb.Append("@(");
+            _tw.Write("@(");
             WriteStatementBlock(arrayExpressionAst.SubExpression.Statements, arrayExpressionAst.SubExpression.Traps);
-            _sb.Append(")");
+            _tw.Write(")");
 
             return AstVisitAction.SkipChildren;
         }
@@ -96,7 +171,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             assignmentStatementAst.Left.Visit(this);
 
-            _sb.Append(' ').Append(GetTokenString(assignmentStatementAst.Operator)).Append(' ');
+            _tw.Write(' ');
+            _tw.Write(GetTokenString(assignmentStatementAst.Operator));
+            _tw.Write(' ');
 
             assignmentStatementAst.Right.Visit(this);
 
@@ -107,7 +184,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(attributeAst);
 
-            _sb.Append('[').Append(attributeAst.TypeName).Append('(');
+            _tw.Write('[');
+            _tw.Write(attributeAst.TypeName);
+            _tw.Write('(');
 
             bool hadPositionalArgs = false;
             if (!IsEmpty(attributeAst.PositionalArguments))
@@ -120,13 +199,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 if (hadPositionalArgs)
                 {
-                    _sb.Append(_comma);
+                    _tw.Write(_comma);
                 }
 
                 Intersperse(attributeAst.NamedArguments, _comma);
             }
 
-            _sb.Append(")]");
+            _tw.Write(")]");
             return AstVisitAction.SkipChildren;
         }
 
@@ -143,9 +222,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (!IsEmpty(baseCtorInvokeMemberExpressionAst.Arguments))
             {
-                _sb.Append("base(");
+                _tw.Write("base(");
                 Intersperse(baseCtorInvokeMemberExpressionAst.Arguments, ", ");
-                _sb.Append(')');
+                _tw.Write(')');
             }
 
             return AstVisitAction.SkipChildren;
@@ -155,7 +234,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             binaryExpressionAst.Left.Visit(this);
 
-            _sb.Append(' ').Append(GetTokenString(binaryExpressionAst.Operator)).Append(' ');
+            _tw.Write(' ');
+            _tw.Write(GetTokenString(binaryExpressionAst.Operator));
+            _tw.Write(' ');
 
             binaryExpressionAst.Right.Visit(this);
 
@@ -178,12 +259,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(catchClauseAst);
 
-            _sb.Append("catch");
+            _tw.Write("catch");
             if (!IsEmpty(catchClauseAst.CatchTypes))
             {
                 foreach (TypeConstraintAst typeConstraint in catchClauseAst.CatchTypes)
                 {
-                    _sb.Append(' ');
+                    _tw.Write(' ');
                     typeConstraint.Visit(this);
                 }
             }
@@ -199,14 +280,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (commandAst.InvocationOperator != TokenKind.Unknown)
             {
-                _sb.Append(GetTokenString(commandAst.InvocationOperator)).Append(' ');
+                _tw.Write(GetTokenString(commandAst.InvocationOperator));
+                _tw.Write(' ');
             }
 
             Intersperse(commandAst.CommandElements, " ");
 
             if (!IsEmpty(commandAst.Redirections))
             {
-                _sb.Append(' ');
+                _tw.Write(' ');
                 Intersperse(commandAst.Redirections, " ");
             }
 
@@ -223,12 +305,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(commandParameterAst);
 
-            _sb.Append('-');
-            _sb.Append(commandParameterAst.ParameterName);
+            _tw.Write('-');
+            _tw.Write(commandParameterAst.ParameterName);
 
             if (commandParameterAst.Argument != null)
             {
-                _sb.Append(':');
+                _tw.Write(':');
                 commandParameterAst.Argument.Visit(this);
             }
 
@@ -246,15 +328,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (constantExpressionAst.Value == null)
             {
-                _sb.Append("$null");
+                _tw.Write("$null");
             }
             else if (constantExpressionAst.StaticType == typeof(bool))
             {
-                _sb.Append((bool)constantExpressionAst.Value ? "$true" : "$false");
+                _tw.Write((bool)constantExpressionAst.Value ? "$true" : "$false");
             }
             else
             {
-                _sb.Append(constantExpressionAst.Value);
+                _tw.Write(constantExpressionAst.Value);
             }
 
             return AstVisitAction.SkipChildren;
@@ -282,11 +364,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitDoUntilStatement(DoUntilStatementAst doUntilStatementAst)
         {
             WriteCommentsToAstPosition(doUntilStatementAst);
-            _sb.Append("do");
+            _tw.Write("do");
             doUntilStatementAst.Body.Visit(this);
-            _sb.Append(" until (");
+            _tw.Write(" until (");
             doUntilStatementAst.Condition.Visit(this);
-            _sb.Append(')');
+            _tw.Write(')');
             EndStatement();
 
             return AstVisitAction.SkipChildren;
@@ -295,11 +377,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitDoWhileStatement(DoWhileStatementAst doWhileStatementAst)
         {
             WriteCommentsToAstPosition(doWhileStatementAst);
-            _sb.Append("do");
+            _tw.Write("do");
             doWhileStatementAst.Body.Visit(this);
-            _sb.Append(" while (");
+            _tw.Write(" while (");
             doWhileStatementAst.Condition.Visit(this);
-            _sb.Append(')');
+            _tw.Write(')');
             EndStatement();
 
             return AstVisitAction.SkipChildren;
@@ -329,7 +411,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitExpandableStringExpression(ExpandableStringExpressionAst expandableStringExpressionAst)
         {
             WriteCommentsToAstPosition(expandableStringExpressionAst);
-            _sb.Append('"').Append(expandableStringExpressionAst.Value).Append('"');
+            _tw.Write('"');
+            _tw.Write(expandableStringExpressionAst.Value);
+            _tw.Write('"');
             return AstVisitAction.SkipChildren;
         }
 
@@ -339,10 +423,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (redirectionAst.FromStream != RedirectionStream.Output)
             {
-                _sb.Append(GetStreamIndicator(redirectionAst.FromStream));
+                _tw.Write(GetStreamIndicator(redirectionAst.FromStream));
             }
 
-            _sb.Append('>');
+            _tw.Write('>');
 
             redirectionAst.Location.Visit(this);
 
@@ -353,11 +437,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(forEachStatementAst);
 
-            _sb.Append("foreach (");
+            _tw.Write("foreach (");
             forEachStatementAst.Variable.Visit(this);
-            _sb.Append(" in ");
+            _tw.Write(" in ");
             forEachStatementAst.Condition.Visit(this);
-            _sb.Append(")");
+            _tw.Write(")");
             forEachStatementAst.Body.Visit(this);
             EndStatement();
 
@@ -368,13 +452,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(forStatementAst);
 
-            _sb.Append("for (");
+            _tw.Write("for (");
             forStatementAst.Initializer.Visit(this);
-            _sb.Append("; ");
+            _tw.Write("; ");
             forStatementAst.Condition.Visit(this);
-            _sb.Append("; ");
+            _tw.Write("; ");
             forStatementAst.Iterator.Visit(this);
-            _sb.Append(')');
+            _tw.Write(')');
             forStatementAst.Body.Visit(this);
             EndStatement();
             return AstVisitAction.SkipChildren;
@@ -384,8 +468,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(functionDefinitionAst);
 
-            _sb.Append(functionDefinitionAst.IsFilter ? "filter " : "function ");
-            _sb.Append(functionDefinitionAst.Name);
+            _tw.Write(functionDefinitionAst.IsFilter ? "filter " : "function ");
+            _tw.Write(functionDefinitionAst.Name);
             Newline();
             functionDefinitionAst.Body.Visit(this);
             EndStatement();
@@ -401,12 +485,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
             {
                 if (functionMemberAst.IsStatic)
                 {
-                    _sb.Append("static ");
+                    _tw.Write("static ");
                 }
 
                 if (functionMemberAst.IsHidden)
                 {
-                    _sb.Append("hidden ");
+                    _tw.Write("hidden ");
                 }
 
                 if (functionMemberAst.ReturnType != null)
@@ -415,9 +499,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 }
             }
 
-            _sb.Append(functionMemberAst.Name).Append('(');
+            _tw.Write(functionMemberAst.Name);
+            _tw.Write('(');
             WriteInlineParameters(functionMemberAst.Parameters);
-            _sb.Append(')');
+            _tw.Write(')');
 
             IReadOnlyList<StatementAst> statementAsts = functionMemberAst.Body.EndBlock.Statements;
 
@@ -427,7 +512,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
                 if (!IsEmpty(baseCtorCall.Arguments))
                 {
-                    _sb.Append(" : ");
+                    _tw.Write(" : ");
                     baseCtorCall.Visit(this);
                 }
 
@@ -442,9 +527,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
             if (IsEmpty(statementAsts) && IsEmpty(functionMemberAst.Body.EndBlock.Traps))
             {
                 Newline();
-                _sb.Append('{');
+                _tw.Write('{');
                 Newline();
-                _sb.Append('}');
+                _tw.Write('}');
                 return AstVisitAction.SkipChildren;
             }
 
@@ -459,11 +544,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(hashtableAst);
 
-            _sb.Append("@{");
+            _tw.Write("@{");
 
             if (IsEmpty(hashtableAst.KeyValuePairs))
             {
-                _sb.Append('}');
+                _tw.Write('}');
                 return AstVisitAction.SkipChildren;
             }
 
@@ -475,7 +560,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 Newline);
 
             Dedent();
-            _sb.Append('}');
+            _tw.Write('}');
 
             return AstVisitAction.SkipChildren;
         }
@@ -484,24 +569,24 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(ifStmtAst);
 
-            _sb.Append("if (");
+            _tw.Write("if (");
             ifStmtAst.Clauses[0].Item1.Visit(this);
-            _sb.Append(')');
+            _tw.Write(')');
             ifStmtAst.Clauses[0].Item2.Visit(this);
 
             for (int i = 1; i < ifStmtAst.Clauses.Count; i++)
             {
                 Newline();
-                _sb.Append("elseif (");
+                _tw.Write("elseif (");
                 ifStmtAst.Clauses[i].Item1.Visit(this);
-                _sb.Append(')');
+                _tw.Write(')');
                 ifStmtAst.Clauses[i].Item2.Visit(this);
             }
 
             if (ifStmtAst.ElseClause != null)
             {
                 Newline();
-                _sb.Append("else");
+                _tw.Write("else");
                 ifStmtAst.ElseClause.Visit(this);
             }
 
@@ -513,20 +598,20 @@ namespace Microsoft.PowerShell.PrettyPrinter
             WriteCommentsToAstPosition(indexExpressionAst);
 
             indexExpressionAst.Target.Visit(this);
-            _sb.Append('[');
+            _tw.Write('[');
             indexExpressionAst.Index.Visit(this);
-            _sb.Append(']');
+            _tw.Write(']');
             return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitInvokeMemberExpression(InvokeMemberExpressionAst methodCallAst)
         {
             methodCallAst.Expression.Visit(this);
-            _sb.Append(methodCallAst.Static ? "::" : ".");
+            _tw.Write(methodCallAst.Static ? "::" : ".");
             methodCallAst.Member.Visit(this);
-            _sb.Append('(');
+            _tw.Write('(');
             Intersperse(methodCallAst.Arguments, ", ");
-            _sb.Append(')');
+            _tw.Write(')');
             return AstVisitAction.SkipChildren;
         }
 
@@ -535,7 +620,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
             WriteCommentsToAstPosition(memberExpressionAst);
 
             memberExpressionAst.Expression.Visit(this);
-            _sb.Append(memberExpressionAst.Static ? "::" : ".");
+            _tw.Write(memberExpressionAst.Static ? "::" : ".");
             memberExpressionAst.Member.Visit(this);
             return AstVisitAction.SkipChildren;
         }
@@ -544,9 +629,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(redirectionAst);
 
-            _sb.Append(GetStreamIndicator(redirectionAst.FromStream))
-                .Append(">&")
-                .Append(GetStreamIndicator(redirectionAst.ToStream));
+            _tw.Write(GetStreamIndicator(redirectionAst.FromStream));
+            _tw.Write(">&");
+            _tw.Write(GetStreamIndicator(redirectionAst.ToStream));
 
             return AstVisitAction.SkipChildren;
         }
@@ -555,11 +640,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(namedAttributeArgumentAst);
 
-           _sb.Append(namedAttributeArgumentAst.ArgumentName);
+           _tw.Write(namedAttributeArgumentAst.ArgumentName);
 
             if (!namedAttributeArgumentAst.ExpressionOmitted && namedAttributeArgumentAst.Argument != null)
             {
-                _sb.Append(" = ");
+                _tw.Write(" = ");
                 namedAttributeArgumentAst.Argument.Visit(this);
             }
 
@@ -572,7 +657,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (!namedBlockAst.Unnamed)
             {
-                _sb.Append(GetTokenString(namedBlockAst.BlockKind));
+                _tw.Write(GetTokenString(namedBlockAst.BlockKind));
             }
 
             BeginBlock();
@@ -597,11 +682,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 }
             }
 
-            _sb.Append("param(");
+            _tw.Write("param(");
 
             if (IsEmpty(paramBlockAst.Parameters))
             {
-                _sb.Append(')');
+                _tw.Write(')');
                 return AstVisitAction.SkipChildren;
             }
 
@@ -609,10 +694,10 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             Intersperse(
                 paramBlockAst.Parameters,
-                () => { _sb.Append(','); Newline(count: 2); });
+                () => { _tw.Write(','); Newline(count: 2); });
 
             Dedent();
-            _sb.Append(')');
+            _tw.Write(')');
 
             return AstVisitAction.SkipChildren;
         }
@@ -634,7 +719,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (parameterAst.DefaultValue != null)
             {
-                _sb.Append(" = ");
+                _tw.Write(" = ");
                 parameterAst.DefaultValue.Visit(this);
             }
 
@@ -644,9 +729,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitParenExpression(ParenExpressionAst parenExpressionAst)
         {
             WriteCommentsToAstPosition(parenExpressionAst);
-            _sb.Append('(');
+            _tw.Write('(');
             parenExpressionAst.Pipeline.Visit(this);
-            _sb.Append(')');
+            _tw.Write(')');
 
             return AstVisitAction.SkipChildren;
         }
@@ -659,7 +744,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 #if PS7
             if (pipelineAst.Background)
             {
-                _sb.Append(" &");
+                _tw.Write(" &");
             }
 #endif
             return AstVisitAction.SkipChildren;
@@ -670,11 +755,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(statementChain);
             statementChain.LhsPipelineChain.Visit(this);
-            _sb.Append(' ').Append(GetTokenString(statementChain.Operator)).Append(' ');
+            _tw.Write(' ');
+            _tw.Write(GetTokenString(statementChain.Operator));
+            _tw.Write(' ');
             statementChain.RhsPipeline.Visit(this);
             if (statementChain.Background)
             {
-                _sb.Append(" &");
+                _tw.Write(" &");
             }
             return AstVisitAction.SkipChildren;
         }
@@ -686,12 +773,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (propertyMemberAst.IsStatic)
             {
-                _sb.Append("static ");
+                _tw.Write("static ");
             }
 
             if (propertyMemberAst.IsHidden)
             {
-                _sb.Append("hidden ");
+                _tw.Write("hidden ");
             }
 
             if (propertyMemberAst.PropertyType != null)
@@ -699,11 +786,12 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 propertyMemberAst.PropertyType.Visit(this);
             }
 
-            _sb.Append('$').Append(propertyMemberAst.Name);
+            _tw.Write('$');
+            _tw.Write(propertyMemberAst.Name);
 
             if (propertyMemberAst.InitialValue != null)
             {
-                _sb.Append(" = ");
+                _tw.Write(" = ");
                 propertyMemberAst.InitialValue.Visit(this);
             }
 
@@ -723,7 +811,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (scriptBlockAst.Parent != null)
             {
-                _sb.Append('{');
+                _tw.Write('{');
                 Indent();
             }
 
@@ -793,7 +881,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
             if (scriptBlockAst.Parent != null)
             {
                 Dedent();
-                _sb.Append('}');
+                _tw.Write('}');
             }
 
             return AstVisitAction.SkipChildren;
@@ -820,11 +908,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
             switch (stringConstantExpressionAst.StringConstantType)
             {
                 case StringConstantType.BareWord:
-                    _sb.Append(stringConstantExpressionAst.Value);
+                    _tw.Write(stringConstantExpressionAst.Value);
                     break;
 
                 case StringConstantType.SingleQuoted:
-                    _sb.Append('\'').Append(stringConstantExpressionAst.Value.Replace("'", "''")).Append('\'');
+                    _tw.Write('\'');
+                    _tw.Write(stringConstantExpressionAst.Value.Replace("'", "''"));
+                    _tw.Write('\'');
                     break;
 
                 case StringConstantType.DoubleQuoted:
@@ -832,11 +922,15 @@ namespace Microsoft.PowerShell.PrettyPrinter
                     break;
 
                 case StringConstantType.SingleQuotedHereString:
-                    _sb.Append("@'\n").Append(stringConstantExpressionAst.Value).Append("\n'@");
+                    _tw.Write("@'\n");
+                    _tw.Write(stringConstantExpressionAst.Value);
+                    _tw.Write("\n'@");
                     break;
 
                 case StringConstantType.DoubleQuotedHereString:
-                    _sb.Append("@\"\n").Append(stringConstantExpressionAst.Value).Append("\n\"@");
+                    _tw.Write("@\"\n");
+                    _tw.Write(stringConstantExpressionAst.Value);
+                    _tw.Write("\n\"@");
                     break;
 
                 default:
@@ -849,9 +943,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitSubExpression(SubExpressionAst subExpressionAst)
         {
             WriteCommentsToAstPosition(subExpressionAst);
-            _sb.Append("$(");
+            _tw.Write("$(");
             WriteStatementBlock(subExpressionAst.SubExpression.Statements, subExpressionAst.SubExpression.Traps);
-            _sb.Append(')');
+            _tw.Write(')');
             return AstVisitAction.SkipChildren;
         }
 
@@ -861,12 +955,14 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (switchStatementAst.Label != null)
             {
-                _sb.Append(':').Append(switchStatementAst.Label).Append(' ');
+                _tw.Write(':');
+                _tw.Write(switchStatementAst.Label);
+                _tw.Write(' ');
             }
 
-            _sb.Append("switch (");
+            _tw.Write("switch (");
             switchStatementAst.Condition.Visit(this);
-            _sb.Append(')');
+            _tw.Write(')');
 
             BeginBlock();
 
@@ -888,7 +984,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
                     Newline(count: 2);
                 }
 
-                _sb.Append("default");
+                _tw.Write("default");
                 switchStatementAst.Default.Visit(this);
             }
 
@@ -903,9 +999,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
             WriteCommentsToAstPosition(ternaryExpressionAst);
 
             ternaryExpressionAst.Condition.Visit(this);
-            _sb.Append(" ? ");
+            _tw.Write(" ? ");
             ternaryExpressionAst.IfTrue.Visit(this);
-            _sb.Append(" : ");
+            _tw.Write(" : ");
             ternaryExpressionAst.IfFalse.Visit(this);
             return AstVisitAction.SkipChildren;
         }
@@ -924,11 +1020,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(trapStatementAst);
 
-            _sb.Append("trap");
+            _tw.Write("trap");
 
             if (trapStatementAst.TrapType != null)
             {
-                _sb.Append(' ');
+                _tw.Write(' ');
                 trapStatementAst.TrapType.Visit(this);
             }
 
@@ -941,7 +1037,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(tryStatementAst);
 
-            _sb.Append("try");
+            _tw.Write("try");
             tryStatementAst.Body.Visit(this);
 
             if (!IsEmpty(tryStatementAst.CatchClauses))
@@ -956,7 +1052,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
             if (tryStatementAst.Finally != null)
             {
                 Newline();
-                _sb.Append("finally");
+                _tw.Write("finally");
                 tryStatementAst.Finally.Visit(this);
             }
 
@@ -966,9 +1062,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitTypeConstraint(TypeConstraintAst typeConstraintAst)
         {
             WriteCommentsToAstPosition(typeConstraintAst);
-            _sb.Append('[');
+            _tw.Write('[');
             WriteTypeName(typeConstraintAst.TypeName);
-            _sb.Append(']');
+            _tw.Write(']');
 
             return AstVisitAction.SkipChildren;
         }
@@ -979,39 +1075,39 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (typeDefinitionAst.IsClass)
             {
-                _sb.Append("class ");
+                _tw.Write("class ");
             }
             else if (typeDefinitionAst.IsInterface)
             {
-                _sb.Append("interface ");
+                _tw.Write("interface ");
             }
             else if (typeDefinitionAst.IsEnum)
             {
-                _sb.Append("enum ");
+                _tw.Write("enum ");
             }
             else
             {
                 throw new ArgumentException($"Unknown PowerShell type definition type: '{typeDefinitionAst}'");
             }
 
-            _sb.Append(typeDefinitionAst.Name);
+            _tw.Write(typeDefinitionAst.Name);
 
             if (!IsEmpty(typeDefinitionAst.BaseTypes))
             {
-                _sb.Append(" : ");
+                _tw.Write(" : ");
 
                 Intersperse(
                     typeDefinitionAst.BaseTypes,
                     (baseType) => WriteTypeName(baseType.TypeName),
-                    () => _sb.Append(_comma));
+                    () => _tw.Write(_comma));
             }
 
             if (IsEmpty(typeDefinitionAst.Members))
             {
                 Newline();
-                _sb.Append('{');
+                _tw.Write('{');
                 Newline();
-                _sb.Append('}');
+                _tw.Write('}');
 
                 return AstVisitAction.SkipChildren;
             }
@@ -1024,7 +1120,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 {
                     Intersperse(typeDefinitionAst.Members, () =>
                     {
-                        _sb.Append(',');
+                        _tw.Write(',');
                         Newline();
                     });
                 }
@@ -1045,9 +1141,9 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitTypeExpression(TypeExpressionAst typeExpressionAst)
         {
             WriteCommentsToAstPosition(typeExpressionAst);
-            _sb.Append('[');
+            _tw.Write('[');
             WriteTypeName(typeExpressionAst.TypeName);
-            _sb.Append(']');
+            _tw.Write(']');
 
             return AstVisitAction.SkipChildren;
         }
@@ -1059,28 +1155,28 @@ namespace Microsoft.PowerShell.PrettyPrinter
             switch (unaryExpressionAst.TokenKind)
             {
                 case TokenKind.PlusPlus:
-                    _sb.Append("++");
+                    _tw.Write("++");
                     unaryExpressionAst.Child.Visit(this);
                     break;
 
                 case TokenKind.MinusMinus:
-                    _sb.Append("--");
+                    _tw.Write("--");
                     unaryExpressionAst.Child.Visit(this);
                     break;
 
                 case TokenKind.PostfixPlusPlus:
                     unaryExpressionAst.Child.Visit(this);
-                    _sb.Append("++");
+                    _tw.Write("++");
                     break;
 
                 case TokenKind.PostfixMinusMinus:
                     unaryExpressionAst.Child.Visit(this);
-                    _sb.Append("--");
+                    _tw.Write("--");
                     break;
 
                 default:
-                    _sb.Append(GetTokenString(unaryExpressionAst.TokenKind))
-                        .Append(' ');
+                    _tw.Write(GetTokenString(unaryExpressionAst.TokenKind));
+                    _tw.Write(' ');
                     unaryExpressionAst.Child.Visit(this);
                     break;
 
@@ -1092,7 +1188,8 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitUsingExpression(UsingExpressionAst usingExpressionAst)
         {
             WriteCommentsToAstPosition(usingExpressionAst);
-            _sb.Append("$using:").Append(((VariableExpressionAst)usingExpressionAst.SubExpression).VariablePath.UserPath);
+            _tw.Write("$using:");
+            _tw.Write(((VariableExpressionAst)usingExpressionAst.SubExpression).VariablePath.UserPath);
             return AstVisitAction.SkipChildren;
         }
 
@@ -1100,28 +1197,28 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             WriteCommentsToAstPosition(usingStatementAst);
 
-            _sb.Append("using ");
+            _tw.Write("using ");
 
             switch (usingStatementAst.UsingStatementKind)
             {
                 case UsingStatementKind.Assembly:
-                    _sb.Append("assembly ");
+                    _tw.Write("assembly ");
                     break;
 
                 case UsingStatementKind.Command:
-                    _sb.Append("command ");
+                    _tw.Write("command ");
                     break;
 
                 case UsingStatementKind.Module:
-                    _sb.Append("module ");
+                    _tw.Write("module ");
                     break;
 
                 case UsingStatementKind.Namespace:
-                    _sb.Append("namespace ");
+                    _tw.Write("namespace ");
                     break;
 
                 case UsingStatementKind.Type:
-                    _sb.Append("type ");
+                    _tw.Write("type ");
                     break;
 
                 default:
@@ -1130,7 +1227,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (usingStatementAst.ModuleSpecification != null)
             {
-                _sb.Append("@{ ");
+                _tw.Write("@{ ");
 
                 Intersperse(
                     usingStatementAst.ModuleSpecification.KeyValuePairs,
@@ -1138,13 +1235,13 @@ namespace Microsoft.PowerShell.PrettyPrinter
                     {
                         WriteCommentsToAstPosition(kvp.Item1);
                         kvp.Item1.Visit(this);
-                        _sb.Append(" = ");
+                        _tw.Write(" = ");
                         WriteCommentsToAstPosition(kvp.Item2);
                         kvp.Item2.Visit(this);
                     },
-                    () => { _sb.Append("; "); });
+                    () => { _tw.Write("; "); });
 
-                _sb.Append(" }");
+                _tw.Write(" }");
                 EndStatement();
 
                 return AstVisitAction.SkipChildren;
@@ -1157,7 +1254,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (usingStatementAst.Alias != null)
             {
-                _sb.Append(" = ");
+                _tw.Write(" = ");
                 usingStatementAst.Alias.Visit(this);
             }
 
@@ -1169,16 +1266,17 @@ namespace Microsoft.PowerShell.PrettyPrinter
         public override AstVisitAction VisitVariableExpression(VariableExpressionAst variableExpressionAst)
         {
             WriteCommentsToAstPosition(variableExpressionAst);
-            _sb.Append(variableExpressionAst.Splatted ? '@' : '$').Append(variableExpressionAst.VariablePath.UserPath);
+            _tw.Write(variableExpressionAst.Splatted ? '@' : '$');
+            _tw.Write(variableExpressionAst.VariablePath.UserPath);
             return AstVisitAction.SkipChildren;
         }
 
         public override AstVisitAction VisitWhileStatement(WhileStatementAst whileStatementAst)
         {
             WriteCommentsToAstPosition(whileStatementAst);
-            _sb.Append("while (");
+            _tw.Write("while (");
             whileStatementAst.Condition.Visit(this);
-            _sb.Append(")");
+            _tw.Write(")");
             whileStatementAst.Body.Visit(this);
 
             return AstVisitAction.SkipChildren;
@@ -1208,7 +1306,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             if (parameter.DefaultValue != null)
             {
-                _sb.Append(" = ");
+                _tw.Write(" = ");
                 parameter.DefaultValue.Visit(this);
             }
         }
@@ -1216,11 +1314,11 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private void WriteControlFlowStatement(string keyword, Ast childAst)
         {
-            _sb.Append(keyword);
+            _tw.Write(keyword);
 
             if (childAst != null)
             {
-                _sb.Append(' ');
+                _tw.Write(' ');
                 childAst.Visit(this);
             }
         }
@@ -1233,33 +1331,33 @@ namespace Microsoft.PowerShell.PrettyPrinter
                     WriteTypeName(arrayTypeName.ElementType);
                     if (arrayTypeName.Rank == 1)
                     {
-                        _sb.Append("[]");
+                        _tw.Write("[]");
                     }
                     else
                     {
-                        _sb.Append('[');
+                        _tw.Write('[');
                         for (int i = 1; i < arrayTypeName.Rank; i++)
                         {
-                            _sb.Append(',');
+                            _tw.Write(',');
                         }
-                        _sb.Append(']');
+                        _tw.Write(']');
                     }
                     break;
 
                 case GenericTypeName genericTypeName:
-                    _sb.Append(genericTypeName.FullName)
-                       .Append('[');
+                    _tw.Write(genericTypeName.FullName);
+                    _tw.Write('[');
 
                     Intersperse(
                         genericTypeName.GenericArguments,
                         (gtn) => WriteTypeName(gtn),
-                        () => _sb.Append(_comma));
+                        () => _tw.Write(_comma));
 
-                    _sb.Append(']');
+                    _tw.Write(']');
                     break;
 
                 case TypeName simpleTypeName:
-                    _sb.Append(simpleTypeName.FullName);
+                    _tw.Write(simpleTypeName.FullName);
                     break;
 
                 default:
@@ -1269,73 +1367,75 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private void WriteDoubleQuotedString(string strVal)
         {
-            _sb.Append('"');
+            _tw.Write('"');
 
             foreach (char c in strVal)
             {
                 switch (c)
                 {
                     case '\0':
-                        _sb.Append("`0");
+                        _tw.Write("`0");
                         break;
 
                     case '\a':
-                        _sb.Append("`a");
+                        _tw.Write("`a");
                         break;
 
                     case '\b':
-                        _sb.Append("`b");
+                        _tw.Write("`b");
                         break;
 
                     case '\f':
-                        _sb.Append("`f");
+                        _tw.Write("`f");
                         break;
 
                     case '\n':
-                        _sb.Append("`n");
+                        _tw.Write("`n");
                         break;
 
                     case '\r':
-                        _sb.Append("`r");
+                        _tw.Write("`r");
                         break;
 
                     case '\t':
-                        _sb.Append("`t");
+                        _tw.Write("`t");
                         break;
 
                     case '\v':
-                        _sb.Append("`v");
+                        _tw.Write("`v");
                         break;
 
                     case '`':
-                        _sb.Append("``");
+                        _tw.Write("``");
                         break;
 
                     case '"':
-                        _sb.Append("`\"");
+                        _tw.Write("`\"");
                         break;
 
                     case '$':
-                        _sb.Append("`$");
+                        _tw.Write("`$");
                         break;
 
                     case '\u001b':
-                        _sb.Append("`e");
+                        _tw.Write("`e");
                         break;
 
                     default:
                         if (c < 128)
                         {
-                            _sb.Append(c);
+                            _tw.Write(c);
                             break;
                         }
 
-                        _sb.Append("`u{").Append(((int)c).ToString("X")).Append('}');
+                        _tw.Write("`u{");
+                        _tw.Write(((int)c).ToString("X"));
+                        _tw.Write('}');
                         break;
                 }
             }
 
-            _sb.Append('"');
+            _tw.Write('"');
         }
 
         private void WriteStatementBlock(IReadOnlyList<StatementAst> statements, IReadOnlyList<TrapStatementAst> traps = null)
@@ -1364,7 +1464,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
                 {
                     if (IsBlockStatement(previousStatement))
                     {
-                        _sb.Append(_newline);
+                        _tw.Write(_newline);
                     }
                     Newline();
                     statements[i].Visit(this);
@@ -1376,30 +1476,30 @@ namespace Microsoft.PowerShell.PrettyPrinter
         private void WriteHashtableEntry(Tuple<ExpressionAst, StatementAst> entry)
         {
             entry.Item1.Visit(this);
-            _sb.Append(" = ");
+            _tw.Write(" = ");
             entry.Item2.Visit(this);
         }
 
         private void BeginBlock()
         {
             Newline();
-            _sb.Append('{');
+            _tw.Write('{');
             Indent();
         }
 
         private void EndBlock()
         {
             Dedent();
-            _sb.Append('}');
+            _tw.Write('}');
         }
 
         private void Newline()
         {
-            _sb.Append(_newline);
+            _tw.Write(_newline);
 
             for (int i = 0; i < _indent; i++)
             {
-                _sb.Append(_indentStr);
+                _tw.Write(_indentStr);
             }
         }
 
@@ -1407,7 +1507,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
         {
             for (int i = 0; i < count - 1; i++)
             {
-                _sb.Append(_newline);
+                _tw.Write(_newline);
             }
 
             Newline();
@@ -1415,7 +1515,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private void EndStatement()
         {
-            _sb.Append(_newline);
+            _tw.Write(_newline);
         }
 
         private void Indent()
@@ -1441,7 +1541,7 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
             for (int i = 1; i < asts.Count; i++)
             {
-                _sb.Append(separator);
+                _tw.Write(separator);
                 asts[i].Visit(this);
             }
         }
@@ -1480,12 +1580,17 @@ namespace Microsoft.PowerShell.PrettyPrinter
 
         private void WriteCommentsToAstPosition(Ast ast)
         {
+            if (_tokens == null)
+            {
+                return;
+            }
+
             Token currToken = _tokens[_tokenIndex];
             while (currToken.Extent.EndOffset < ast.Extent.StartOffset)
             {
                 if (currToken.Kind == TokenKind.Comment)
                 {
-                    _sb.Append(currToken.Text);
+                    _tw.Write(currToken.Text);
 
                     if (currToken.Text.StartsWith("#"))
                     {
