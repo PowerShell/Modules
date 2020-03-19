@@ -90,8 +90,13 @@ namespace Microsoft.PowerShell.UnixCompleters
                 commandLine = "'" + commandAst.Extent.Text + "'";
 
                 // Handle a case like '/mnt/c/Program Files'/<TAB> where the slash is outside the string
-                IScriptExtent currentExtent = commandAst.CommandElements[cursorWordIndex].Extent;      // The presumed slash-prefixed string
-                IScriptExtent previousExtent = commandAst.CommandElements[cursorWordIndex - 1].Extent; // The string argument
+
+                // The presumed slash-prefixed string
+                IScriptExtent currentExtent = commandAst.CommandElements[cursorWordIndex].Extent;
+
+                // The string argument
+                IScriptExtent previousExtent = commandAst.CommandElements[cursorWordIndex - 1].Extent;
+
                 if (currentExtent.Text.StartsWith("/") && currentExtent.StartColumnNumber == previousExtent.EndColumnNumber)
                 {
                     commandLine = commandLine.Replace(previousExtent.Text + currentExtent.Text, wordToComplete);

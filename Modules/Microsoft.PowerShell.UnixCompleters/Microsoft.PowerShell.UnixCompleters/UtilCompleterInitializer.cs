@@ -106,16 +106,6 @@ namespace Microsoft.PowerShell.UnixCompleters
             }
         }
 
-        private void WriteError(string errorMessage)
-        {
-            using (var pwsh = SMA.PowerShell.Create())
-            {
-                pwsh.AddCommand("Write-Error")
-                    .AddParameter("Message", errorMessage)
-                    .Invoke();
-            }
-        }
-
         private static void OnRunspaceAvailable(object sender, RunspaceAvailabilityEventArgs args)
         {
             if (args.RunspaceAvailability != RunspaceAvailability.Available)

@@ -122,7 +122,7 @@ namespace Microsoft.PowerShell.UnixCompleters
 
         private const int X_OK = 0x01;
 
-        [DllImport("libc")]
+        [DllImport("libc", CharSet = CharSet.Ansi, SetLastError = true)]
         private static extern int access(string pathname, int mode);
     }
 }
