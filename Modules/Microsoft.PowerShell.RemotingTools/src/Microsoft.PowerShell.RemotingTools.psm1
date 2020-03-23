@@ -379,7 +379,7 @@ function Enable-SSHRemoting
     }
     elseif ($platformInfo.IsLinux)
     {
-        $sshdStatus = systemctl status sshd
+        $sshdStatus = sudo service ssh status
         $SSHDFound = $null -ne $sshdStatus
     }
     else

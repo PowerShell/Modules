@@ -1,7 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-using Microsoft.PowerShell.SecretsManagement;
+using Microsoft.PowerShell.SecretManagement;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -10,18 +10,19 @@ using System.Management.Automation;
 using System.Management.Automation.Runspaces;
 using System.Security;
 
-namespace CodeLocalVault
+namespace TestLocalBin
 {
-    #region ImplementingClass
 
-    public class ImplementingClass : SecretsManagementExtension
+    #region TestLocalBin
+
+    public class TestLocalBinExtension : SecretManagementExtension
     {
         #region Constructors
 
-        private ImplementingClass() : base(string.Empty)
+        private TestLocalBinExtension() : base(string.Empty)
         { }
 
-        public ImplementingClass(string vaultName) : base(vaultName)
+        public TestLocalBinExtension(string vaultName) : base(vaultName)
         { }
 
         #endregion
@@ -31,12 +32,13 @@ namespace CodeLocalVault
         public override bool SetSecret(
             string name,
             object secret,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
             var results = PowerShellInvoker.InvokeCommand(
                 command: "Set-Secret",
-                args: new object[] { name, secret },
+                args: new object[] { name, secret, vaultName },
                 dataStreams: out PSDataStreams dataStreams);
 
             if (dataStreams.Error.Count > 0)
@@ -51,12 +53,13 @@ namespace CodeLocalVault
 
         public override object GetSecret(
             string name,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
             var result = PowerShellInvoker.InvokeCommand(
                 command: "Get-Secret",
-                args: new object[] { name },
+                args: new object[] { name, vaultName },
                 dataStreams: out PSDataStreams dataStreams);
 
             error = dataStreams.Error.Count > 0 ? dataStreams.Error[0].Exception : null;
@@ -66,12 +69,13 @@ namespace CodeLocalVault
 
         public override bool RemoveSecret(
             string name,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
             PowerShellInvoker.InvokeCommand(
                 command: "Remove-Secret",
-                args: new object[] { name },
+                args: new object[] { name, vaultName },
                 dataStreams: out PSDataStreams dataStreams);
 
             if (dataStreams.Error.Count > 0)
@@ -84,57 +88,39 @@ namespace CodeLocalVault
             return true;
         }
 
-        public override KeyValuePair<string, string>[] GetSecretInfo(
+        public override SecretInformation[] GetSecretInfo(
             string filter,
+            string vaultName,
             IReadOnlyDictionary<string, object> parameters,
             out Exception error)
         {
             var results = PowerShellInvoker.InvokeCommand(
-                command: "Enumerate-Secrets",
-                args: new object[] { filter },
+                command: "Get-SecretInfo",
+                args: new object[] { filter, vaultName },
                 dataStreams: out PSDataStreams dataStreams);
 
             error = dataStreams.Error.Count > 0 ? dataStreams.Error[0].Exception : null;
 
-            var list = new List<KeyValuePair<string, string>>(results.Count);
-            foreach (dynamic result in results)
+            var list = new List<SecretInformation>(results.Count);
+            foreach (var result in results)
             {
-                string typeName;
-                var resultValue = (result.Value is PSObject) ? ((PSObject)result.Value).BaseObject : result.Value;
-                switch (resultValue)
+                SecretInformation item = ((result is PSObject) ? result.BaseObject : null) as SecretInformation;
+                if (item != null)
                 {
-                    case byte[] blob:
-                        typeName = nameof(SupportedTypes.ByteArray);
-                        break;
-
-                    case string str:
-                        typeName = nameof(SupportedTypes.String);
-                        break;
-
-                    case SecureString sstr:
-                        typeName = nameof(SupportedTypes.SecureString);
-                        break;
-
-                    case PSCredential cred:
-                        typeName = nameof(SupportedTypes.PSCredential);
-                        break;
-
-                    case Hashtable ht:
-                        typeName = nameof(SupportedTypes.Hashtable);
-                        break;
-
-                    default:
-                        typeName = nameof(SupportedTypes.Unknown);
-                        break;
+                    list.Add(item);
                 }
-
-                list.Add(
-                    new KeyValuePair<string, string>(
-                        key: result.Name,
-                        value: typeName));
             }
 
             return list.ToArray();
+        }
+
+        public override bool TestSecretVault(
+            string vaultName,
+            IReadOnlyDictionary<string, object> parameters,
+            out Exception[] errors)
+        {
+            errors = null;
+            return true;
         }
 
         #endregion
@@ -151,7 +137,11 @@ namespace CodeLocalVault
         private const string FunctionsDefScript = @"
             function Get-Path
             {
-                $path = Join-Path $env:TEMP 'TVECode'
+                param(
+                    [string] $VaultName
+                )
+
+                $path = Join-Path $env:TEMP $VaultName
                 if (! (Test-Path -Path $path))
                 {
                     [System.IO.Directory]::CreateDirectory($path)
@@ -165,7 +155,9 @@ namespace CodeLocalVault
                 param(
                     [Parameter(Mandatory=$true)]
                     [ValidateNotNullOrEmpty()]
-                    [string] $Name
+                    [string] $Name,
+
+                    [string] $VaultName
                 )
 
                 if ([WildcardPattern]::ContainsWildcardCharacters($Name))
@@ -173,34 +165,50 @@ namespace CodeLocalVault
                     throw ""The Name parameter cannot contain any wild card characters.""
                 }
 
-                $filePath = Join-Path -Path (Get-Path) -ChildPath ""${Name}.xml""
+                $filePath = Join-Path -Path (Get-Path $VaultName) -ChildPath ""${Name}.xml""
     
                 if (! (Test-Path -Path $filePath))
                 {
                     return
                 }
 
-                Import-CliXml -Path $filePath
+                $secret = Import-CliXml -Path $filePath
+                if ($secret.GetType().IsArray)
+                {
+                    return @(,[byte[]] $secret)
+                }
+
+                return $secret
             }
 
-            function Enumerate-Secrets
+            function Get-SecretInfo
             {
                 param(
-                    [string] $Name
+                    [string] $Name,
+                    [string] $VaultName
                 )
 
                 if ([string]::IsNullOrEmpty($Name)) { $Name = '*' }
 
-                $files = dir(Join-Path -Path (Get-Path) -ChildPath ""${Name}.xml"") 2>$null
+                $files = dir (Join-Path -Path (Get-Path $VaultName) -ChildPath ""${Name}.xml"") 2>$null
 
                 foreach ($file in $files)
                 {
                     $secretName = [System.IO.Path]::GetFileNameWithoutExtension((Split-Path $file -Leaf))
                     $secret = Import-Clixml -Path $file.FullName
-                    Write-Output([pscustomobject] @{
-                        Name = $secretName
-                        Value = $secret
-                    })
+                    
+                    $type = if ($secret.gettype().IsArray) { [Microsoft.PowerShell.SecretManagement.SecretType]::ByteArray }
+                        elseif ($secret -is [string]) { [Microsoft.PowerShell.SecretManagement.SecretType]::String }
+                        elseif ($secret -is [securestring]) { [Microsoft.PowerShell.SecretManagement.SecretType]::SecureString }
+                        elseif ($secret -is [PSCredential]) { [Microsoft.PowerShell.SecretManagement.SecretType]::PSCredential }
+                        elseif ($secret -is [hashtable]) { [Microsoft.PowerShell.SecretManagement.SecretType]::Hashtable }
+                        else { [Microsoft.PowerShell.SecretManagement.SecretType]::Unknown }
+        
+                    Write-Output (
+                        [Microsoft.PowerShell.SecretManagement.SecretInformation]::new(
+                            $secretName,
+                            $type,
+                            $VaultName))
                 }
             }
 
@@ -213,10 +221,12 @@ namespace CodeLocalVault
 
                     [Parameter(Mandatory=$true)]
                     [ValidateNotNull()]
-                    [object] $Secret
+                    [object] $Secret,
+
+                    [string] $VaultName
                 )
 
-                $filePath = Join-Path -Path (Get-Path) ""${Name}.xml""
+                $filePath = Join-Path -Path (Get-Path $VaultName) ""${Name}.xml""
                 if (Test-Path -Path $filePath)
                 {
                     Write-Error ""Secret name, $Name, is already used in this vault.""
@@ -229,10 +239,11 @@ namespace CodeLocalVault
             function Remove-Secret
             {
                 param(
-                    [string] $Name
+                    [string] $Name,
+                    [string] $VaultName
                 )
 
-                $filePath = Join-Path -Path (Get-Path) ""${Name}.xml""
+                $filePath = Join-Path -Path (Get-Path $VaultName) ""${Name}.xml""
                 if (! (Test-Path -Path $filePath))
                 {
                     Write-Error ""The secret $Name does not exist""
