@@ -23,7 +23,7 @@ Registering extension vaults:
 
 Accessing secrets:
 
-- Add-Secret
+- Set-Secret
 - Get-Secret
 - Get-SecretInfo
 - Remove-Secret
