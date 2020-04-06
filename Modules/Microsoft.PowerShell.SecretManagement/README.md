@@ -19,11 +19,11 @@ Registering extension vaults:
 - Register-SecretVault
 - Get-SecretVault
 - Unregister-SecretVault
-- Test-Vault
+- Test-SecretVault
 
 Accessing secrets:
 
-- Add-Secret
+- Set-Secret
 - Get-Secret
 - Get-SecretInfo
 - Remove-Secret
