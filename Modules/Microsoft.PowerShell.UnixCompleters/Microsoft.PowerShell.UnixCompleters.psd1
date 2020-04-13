@@ -19,7 +19,7 @@ Author = 'Microsoft Corporation'
 CompanyName = 'Microsoft Corporation'
 
 # Copyright statement for this module
-Copyright = '© Microsoft Corporation'
+Copyright = '(c) Microsoft Corporation'
 
 # Description of the functionality provided by this module
 Description = 'Get parameter completion for native Unix utilities. Requires zsh or bash.'
