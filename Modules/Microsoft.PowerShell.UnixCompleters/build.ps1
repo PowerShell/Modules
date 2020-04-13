@@ -10,10 +10,6 @@ param(
     [string]
     $Configuration = 'Debug',
 
-    [Parameter(ParameterSetName = 'Build')]
-    [switch]
-    $Clean,
-
     [Parameter(ParameterSetName = 'Test')]
     [switch]
     $Build,
@@ -25,7 +21,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$script:ModuleName = './Microsoft.PowerShell.UnixCompleters'
+$script:ModuleName = 'Microsoft.PowerShell.UnixCompleters'
 $script:OutDir = "$PSScriptRoot/out"
 $script:OutModuleDir = "$script:OutDir/$script:ModuleName"
 $script:SrcDir = "$PSScriptRoot/$script:ModuleName"
@@ -35,28 +31,19 @@ $script:ZshCompleterScriptLocation = "$script:OutModuleDir/zcomplete.sh"
 $script:Artifacts = @{
     "${script:ModuleName}.psd1" = "${script:ModuleName}.psd1"
     "${script:ModuleName}.psm1" = "${script:ModuleName}.psm1"
-    "PSUnixUtilCompleters/bin/$Configuration/${script:Framework}/$script:ModuleName.dll" = "$script:ModuleName.dll"
-    "PSUnixUtilCompleters/bin/$Configuration/${script:Framework}/$script:ModuleName.pdb" = "$script:ModuleName.pdb"
-    "LICENSE" = "LICENSE.txt"
+    "${script:ModuleName}/bin/$Configuration/${script:Framework}/$script:ModuleName.dll" = "$script:ModuleName.dll"
+    "${script:ModuleName}/bin/$Configuration/${script:Framework}/$script:ModuleName.pdb" = "$script:ModuleName.pdb"
+    "../../LICENSE" = "LICENSE.txt"
 }
 
 function Exec([scriptblock]$sb, [switch]$IgnoreExitcode)
 {
-    $backupEAP = $script:ErrorActionPreference
-    $script:ErrorActionPreference = "Continue"
-    try
+    & $sb
+    # note, if $sb doesn't have a native invocation, $LASTEXITCODE will
+    # point to the obsolete value
+    if ($LASTEXITCODE -ne 0 -and -not $IgnoreExitcode)
     {
-        & $sb
-        # note, if $sb doesn't have a native invocation, $LASTEXITCODE will
-        # point to the obsolete value
-        if ($LASTEXITCODE -ne 0 -and -not $IgnoreExitcode)
-        {
-            throw "Execution of {$sb} failed with exit code $LASTEXITCODE"
-        }
-    }
-    finally
-    {
-        $script:ErrorActionPreference = $backupEAP
+	throw "Execution of {$sb} failed with exit code $LASTEXITCODE"
     }
 }
 
@@ -71,15 +58,12 @@ if ($PSCmdlet.ParameterSetName -eq 'Build' -or $Build)
         throw 'Unable to find dotnet executable'
     }
 
-    if ($Clean)
+    foreach ($path in $script:OutDir,"${script:SrcDir}/bin","${script:SrcDir}/obj")
     {
-        foreach ($path in $script:OutDir,"${script:SrcDir}/bin","${script:SrcDir}/obj")
-        {
-            if (Test-Path -Path $path)
-            {
-                Remove-Item -Force -Recurse -Path $path -ErrorAction Stop
-            }
-        }
+	if (Test-Path -Path $path)
+	{
+	    Remove-Item -Force -Recurse -Path $path -ErrorAction Stop
+	}
     }
 
     Push-Location $script:SrcDir
@@ -96,7 +80,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Build' -or $Build)
 
     foreach ($artifactEntry in $script:Artifacts.GetEnumerator())
     {
-        Copy-Item -Path $artifactEntry.Key -Destination (Join-Path $script:OutModuleDir $artifactEntry.Value) -ErrorAction Stop
+        Copy-Item -Path (Join-Path $PSScriptRoot $artifactEntry.Key) -Destination (Join-Path $script:OutModuleDir $artifactEntry.Value) -ErrorAction Stop
     }
 
     # We need the zsh completer script to drive zsh completions
