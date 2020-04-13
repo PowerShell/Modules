@@ -60,6 +60,12 @@ AliasesToExport = @()
             # Flag to indicate whether the module requires explicit user acceptance for install/update/save
             RequireLicenseAcceptance = $false
 
+            Tags = @(
+                'PSEdition_Core',
+                'Linux',
+                'Mac'
+            )
+
         } # End of PSData hashtable
 
     } # End of PrivateData hashtable
