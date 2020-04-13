@@ -1,9 +1,7 @@
 @{
 
 # Script module or binary module file associated with this manifest.
-RootModule = 'Microsoft.PowerShell.UnixCompleters.psm1'
-
-NestedModules = @('Microsoft.PowerShell.UnixCompleters.dll')
+RootModule = 'Microsoft.PowerShell.UnixCompleters.dll'
 
 # Version number of this module.
 ModuleVersion = '0.1.1'
@@ -30,7 +28,7 @@ Description = 'Get parameter completion for native Unix utilities. Requires zsh 
 PowerShellVersion = '6.0'
 
 # Script files (.ps1) that are run in the caller's environment prior to importing this module.
-ScriptsToProcess = @()
+ScriptsToProcess = @("OnStart.ps1")
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
 FunctionsToExport = @()

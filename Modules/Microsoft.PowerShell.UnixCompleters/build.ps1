@@ -30,7 +30,7 @@ $script:ZshCompleterScriptLocation = "$script:OutModuleDir/zcomplete.sh"
 
 $script:Artifacts = @{
     "${script:ModuleName}.psd1" = "${script:ModuleName}.psd1"
-    "${script:ModuleName}.psm1" = "${script:ModuleName}.psm1"
+    "OnStart.ps1" = "OnStart.ps1"
     "${script:ModuleName}/bin/$Configuration/${script:Framework}/$script:ModuleName.dll" = "$script:ModuleName.dll"
     "${script:ModuleName}/bin/$Configuration/${script:Framework}/$script:ModuleName.pdb" = "$script:ModuleName.pdb"
     "../../LICENSE" = "LICENSE.txt"

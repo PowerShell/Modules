@@ -70,8 +70,7 @@ namespace Microsoft.PowerShell.UnixCompleters
             if ((string.IsNullOrEmpty(preferredCompletionShell) || !UnixHelpers.TryFindShell(preferredCompletionShell, out shellExePath, out shellType))
                 && !UnixHelpers.TryFindFallbackShell(out shellExePath, out shellType))
             {
-                WriteError("Unable to find shell to provide unix utility completions");
-                return;
+                throw new FileNotFoundException("Unable to find shell to provide unix utility completions");
             }
 
             IUnixUtilCompleter utilCompleter;
@@ -86,8 +85,7 @@ namespace Microsoft.PowerShell.UnixCompleters
                     break;
 
                 default:
-                    WriteError("Unable to find shell to provide unix utility completions");
-                    return;
+                    throw new FileNotFoundException("Unable to find shell to provide unix utility completions");
             }
 
             IEnumerable<string> utilsToComplete = utilCompleter.FindCompletableCommands();
