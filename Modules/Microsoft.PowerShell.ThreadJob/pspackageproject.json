@@ -1,0 +1,8 @@
+{
+  "ModuleName": "Microsoft.PowerShell.ThreadJob",
+  "Culture": "en-US",
+  "BuildOutputPath": "out",
+  "HelpPath": "help",
+  "TestPath": "test",
+  "SourcePath": "src"
+}
