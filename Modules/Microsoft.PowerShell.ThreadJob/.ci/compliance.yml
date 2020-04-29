@@ -89,7 +89,7 @@ steps:
   displayName: 'TSA upload to Codebase: PSThreadJob_201912 Stamp: Azure'
   inputs:
     tsaStamp: Azure
-    codeBaseName: PSThreadJob_201912
+    codeBaseName: PSThreadJob_202004
     tsaVersion: TsaV2
     uploadFortifySCA: false
     uploadFxCop: false
