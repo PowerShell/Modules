@@ -22,8 +22,8 @@ function DoBuild
     Copy-Item "${SrcPath}/${ModuleName}.psd1" "${OutDirectory}/${ModuleName}"
 
     # Copy format files here
-    Write-Verbose -Verbose "Copy-Item ${SrcPath}/${ModuleName}.format.ps1xml to ${OutDirectory}/${ModuleName}"
-    copy-item "${SrcPath}/${ModuleName}.format.ps1xml" "${OutDirectory}/${ModuleName}"
+    # Write-Verbose -Verbose "Copy-Item ${SrcPath}/${ModuleName}.format.ps1xml to ${OutDirectory}/${ModuleName}"
+    # copy-item "${SrcPath}/${ModuleName}.format.ps1xml" "${OutDirectory}/${ModuleName}"
 
     # Copy help
     Write-Verbose -Verbose -Message "Copying help files to '$BuildOutPath'"
