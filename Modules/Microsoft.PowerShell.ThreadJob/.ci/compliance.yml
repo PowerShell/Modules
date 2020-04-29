@@ -61,7 +61,7 @@ steps:
   displayName: 'Run BinSkim '
   inputs:
     InputType: Basic
-    AnalyzeTarget: '$(BUILD_SOURCE)\Microsoft.PowerShell.SecretManagement\Microsoft.PowerShell.SecretManagement.dll'
+    AnalyzeTarget: '$(BUILD_SOURCE)\Microsoft.PowerShell.ThreadJob\Microsoft.PowerShell.ThreadJob.dll'
     AnalyzeSymPath: 'SRV*'
     AnalyzeVerbose: true
     AnalyzeHashes: true
@@ -88,6 +88,7 @@ steps:
 - task: securedevelopmentteam.vss-secure-development-tools.build-task-uploadtotsa.TSAUpload@1
   displayName: 'TSA upload to Codebase: PSThreadJob_201912 Stamp: Azure'
   inputs:
+    tsaStamp: Azure
     codeBaseName: PSThreadJob_201912
     tsaVersion: TsaV2
     uploadFortifySCA: false
