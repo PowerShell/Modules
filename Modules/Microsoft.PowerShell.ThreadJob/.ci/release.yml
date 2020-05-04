@@ -22,13 +22,13 @@ jobs:
     displayName: 'Install NuGet'
 
   - powershell: |
-      Get-ChildItem '$(System.ArtifactsDirectory)/Microsoft.PowerShell.ThreadJob.*.nupkg'
+      Get-ChildItem '$(System.ArtifactsDirectory)/nupkg/Microsoft.PowerShell.ThreadJob.*.nupkg'
     displayName: 'Capture NuGet package'
 
   - task: NuGetCommand@2
     displayName: 'Push PSThreadJob artifacts to AzArtifactsFeed'
     inputs:
       command: push
-      packagesToPush: '$(System.ArtifactsDirectory)/Microsoft.PowerShell.ThreadJob.*.nupkg'
+      packagesToPush: '$(System.ArtifactsDirectory)/nupkg/Microsoft.PowerShell.ThreadJob.*.nupkg'
       nuGetFeedType: external
       publishFeedCredentials: AzArtifactFeed

@@ -22,13 +22,13 @@ jobs:
     displayName: 'Install NuGet'
 
   - powershell: |
-      Get-ChildItem '$(System.ArtifactsDirectory)/Microsoft.PowerShell.SecretManagement.*.nupkg'
+      Get-ChildItem '$(System.ArtifactsDirectory)/nupkg/Microsoft.PowerShell.SecretManagement.*.nupkg'
     displayName: 'Capture NuGet package'
 
   - task: NuGetCommand@2
     displayName: 'Push Microsoft.PowerShell.SecretManagement artifacts to AzArtifactsFeed'
     inputs:
       command: push
-      packagesToPush: '$(System.ArtifactsDirectory)/Microsoft.PowerShell.SecretManagement.*.nupkg'
+      packagesToPush: '$(System.ArtifactsDirectory)/nupkg/Microsoft.PowerShell.SecretManagement.*.nupkg'
       nuGetFeedType: external
       publishFeedCredentials: AzArtifactFeed
