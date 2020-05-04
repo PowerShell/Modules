@@ -22,13 +22,13 @@ jobs:
     displayName: 'Install NuGet'
 
   - powershell: |
-      Get-ChildItem '$(Build.ArtifactStagingDirectory)/Microsoft.PowerShell.RemotingTools.*.nupkg'
+      Get-ChildItem '$(Build.ArtifactStagingDirectory)/nupkg/Microsoft.PowerShell.RemotingTools.*.nupkg'
     displayName: 'Capture NuGet package'
 
   - task: NuGetCommand@2
     displayName: 'Push PSThreadJob artifacts to AzArtifactsFeed'
     inputs:
       command: push
-      packagesToPush: '$(System.ArtifactsDirectory)/Microsoft.PowerShell.RemotingTools.*.nupkg'
+      packagesToPush: '$(System.ArtifactsDirectory)/nupkg/Microsoft.PowerShell.RemotingTools.*.nupkg'
       nuGetFeedType: external
       publishFeedCredentials: AzArtifactFeed
