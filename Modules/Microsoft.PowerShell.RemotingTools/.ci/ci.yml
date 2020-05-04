@@ -56,10 +56,11 @@ stages:
         Install-Module -Name PSPackageProject -Force
         $config = Get-PSPackageProjectConfiguration
         $signSrcPath = "$($config.BuildOutputPath)\$($config.ModuleName)"
-        $signOutPath = "$($config.BuildOutputPath)\$($config.ModuleName)\Signed"
+        $signOutPath = "$($config.SignedOutputPath)\$($config.ModuleName)"
         if (! (Test-Path -Path $signOutPath)) {
           $null = New-Item -Path $signOutPath -ItemType Directory
         }
+        Write-Host "Signed output path is: $signOutPath"
         $vstsCommandString = "vso[task.setvariable variable=signSrcPath]${signSrcPath}"
         Write-Host "sending " + $vstsCommandString
         Write-Host "##$vstsCommandString"
@@ -87,6 +88,10 @@ stages:
         binVersion: Production
         binVersionOverride: ''
       condition: and(and(succeeded(), eq(variables['Build.Reason'], 'Manual')), ne(variables['SkipSigning'], 'True'))
+
+    - pwsh: |
+        $(Build.SourcesDirectory)/build.ps1 -Publish -Signed
+      displayName: Create signed artifact
 
 - stage: Compliance
   displayName: Compliance
