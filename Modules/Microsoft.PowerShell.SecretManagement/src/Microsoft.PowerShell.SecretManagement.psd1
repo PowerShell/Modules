@@ -7,7 +7,7 @@
 RootModule = '.\Microsoft.PowerShell.SecretManagement.dll'
 
 # Version number of this module.
-ModuleVersion = '0.2.1'
+ModuleVersion = '0.3.0'
 
 # Supported PSEditions
 CompatiblePSEditions = @('Core')
@@ -44,6 +44,10 @@ All previous vault extensions will need to be updated.
 
 *****
 This is an alpha version of the module that currently works only on Windows platforms.
+*****
+
+*****
+Breaking change for 0.3.0: Adding new local secure store that works cross platform.
 *****
 "
 

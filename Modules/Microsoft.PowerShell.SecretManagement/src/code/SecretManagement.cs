@@ -400,16 +400,16 @@ namespace Microsoft.PowerShell.SecretManagement
                 parametersName = ScriptParamTag + vaultName + "_";
 
                 // Store parameters in built-in local secure vault.
-                int errorCode = 0;
+                string errorMsg = "";
                 if (!LocalSecretStore.Instance.WriteObject(
                     name: parametersName,
                     parameters,
-                    ref errorCode))
+                    ref errorMsg))
                 {
                     var msg = string.Format(
                         CultureInfo.InvariantCulture, 
                         "Unable to register vault extension because writing script parameters to the built-in local store failed with error: {0}",
-                        LocalSecretStore.Instance.GetErrorMessage(errorCode));
+                        errorMsg);
 
                     ThrowTerminatingError(
                         new ErrorRecord(
@@ -540,12 +540,11 @@ namespace Microsoft.PowerShell.SecretManagement
                 var parametersName = (string) vaultInfo[ParametersNameKey];
                 if (!string.IsNullOrEmpty(parametersName))
                 {
-                    int errorCode = 0;
-                    if (!LocalSecretStore.Instance.DeleteObject(parametersName, ref errorCode))
+                    string errorMsg = "";
+                    if (!LocalSecretStore.Instance.DeleteObject(parametersName, ref errorMsg))
                     {
-                        var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                         var msg = string.Format(CultureInfo.InvariantCulture, 
-                            "Removal of vault info script parameters {0} failed with error {1}", parametersName, errorMessage);
+                            "Removal of vault info script parameters {0} failed with error {1}", parametersName, errorMsg);
                         WriteError(
                             new ErrorRecord(
                                 new PSInvalidOperationException(msg),
@@ -763,11 +762,11 @@ namespace Microsoft.PowerShell.SecretManagement
         private void SearchLocalStore(string name)
         {
             // Search through the built-in local vault.
-            int errorCode = 0;
+            string errorMsg = "";
             if (LocalSecretStore.Instance.EnumerateObjectInfo(
                 filter: Name,
                 outSecretInfo: out SecretInformation[] outSecretInfo,
-                errorCode: ref errorCode))
+                errorMsg: ref errorMsg))
             {
                 WriteResults(
                     results: outSecretInfo,
@@ -954,11 +953,11 @@ namespace Microsoft.PowerShell.SecretManagement
 
         private bool SearchLocalStore(string name)
         {
-            int errorCode = 0;
+            string errorMsg = "";
             if (LocalSecretStore.Instance.ReadObject(
                 name: name,
                 outObject: out object outObject,
-                ref errorCode))
+                ref errorMsg))
             {
                 WriteSecret(outObject);
                 return true;
@@ -1081,34 +1080,31 @@ namespace Microsoft.PowerShell.SecretManagement
             }
 
             // Add to default built-in vault (after NoClobber check).
-            int errorCode = 0;
+            string errorMsg = "";
             if (NoClobber)
             {
                 if (LocalSecretStore.Instance.ReadObject(
                     name: Name,
                     out object _,
-                    ref errorCode))
+                    ref errorMsg))
                 {
-                    var msg = string.Format(CultureInfo.InvariantCulture, 
-                        "A secret with name {0} already exists in the local default vault", Name);
                     ThrowTerminatingError(
                         new ErrorRecord(
-                            new PSInvalidOperationException(msg),
+                            new PSInvalidOperationException(errorMsg),
                             "AddSecretAlreadyExists",
                             ErrorCategory.ResourceExists,
                             this));
                 }
             }
 
-            errorCode = 0;
+            errorMsg = "";
             if (!LocalSecretStore.Instance.WriteObject(
                 name: Name,
                 objectToWrite: secretToWrite,
-                ref errorCode))
+                ref errorMsg))
             {
-                var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                 var msg = string.Format(CultureInfo.InvariantCulture, 
-                    "The secret could not be written to the local default vault.  Error: {0}", errorMessage);
+                    "The secret could not be written to the local default vault.  Error: {0}", errorMsg);
                 ThrowTerminatingError(
                     new ErrorRecord(
                         new PSInvalidOperationException(msg),
@@ -1164,14 +1160,13 @@ namespace Microsoft.PowerShell.SecretManagement
             if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 // Remove from local built-in default vault.
-                int errorCode = 0;
+                string errorMsg = "";
                 if (!LocalSecretStore.Instance.DeleteObject(
                     name: Name,
-                    ref errorCode))
+                    errorMsg: ref errorMsg))
                 {
-                    var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                     var msg = string.Format(CultureInfo.InvariantCulture, 
-                        "The secret could not be removed from the local default vault. Error: {0}", errorMessage);
+                        "The secret could not be removed from the local default vault. Error: {0}", errorMsg);
                     ThrowTerminatingError(
                         new ErrorRecord(
                             new PSInvalidOperationException(msg),
@@ -1224,7 +1219,7 @@ namespace Microsoft.PowerShell.SecretManagement
             bool success;
             if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
-                // TODO: Add test for CredMan, Keyring, etc.
+                // TODO: Add test for SecureStore
                 success = true;
             }
             else

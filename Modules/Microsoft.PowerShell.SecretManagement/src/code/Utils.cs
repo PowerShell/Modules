@@ -10,42 +10,264 @@ using System.IO;
 using System.Management.Automation;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 
 using Dbg = System.Diagnostics.Debug;
 
 namespace Microsoft.PowerShell.SecretManagement
 {
-    #region BaseLocalSecretStore
+    #region Utils
 
-    internal abstract class BaseLocalSecretStore
+    internal static class Utils
     {
         #region Members
 
-        protected const string PSTag = "ps:";
-        protected const string PSHashtableTag = "psht:";
-        protected const string ByteArrayType = "ByteArrayType";
-        protected const string StringType = "StringType";
-        protected const string SecureStringType = "SecureStringType";
-        protected const string PSCredentialType = "CredentialType";
-        protected const string HashtableType = "HashtableType";
+#if UNIX
+        private static readonly string LocalLocation = Environment.GetEnvironmentVariable("HOME");
+#else
+        private static readonly string LocalLocation = Environment.GetEnvironmentVariable("USERPROFILE");
+#endif
+        private static readonly string SMLocalPath = Path.Combine(LocalLocation, ".secretmanagement");
 
-        protected const int MaxHashtableItemCount = 20;
+        private const string ConvertJsonToHashtableScript = @"
+            param (
+                [string] $json
+            )
+
+            function ConvertToHash
+            {
+                param (
+                    [pscustomobject] $object
+                )
+
+                $output = @{}
+                $object | Get-Member -MemberType NoteProperty | ForEach-Object {
+                    $name = $_.Name
+                    $value = $object.($name)
+
+                    if ($value -is [object[]])
+                    {
+                        $array = @()
+                        $value | ForEach-Object {
+                            $array += (ConvertToHash $_)
+                        }
+                        $output.($name) = $array
+                    }
+                    elseif ($value -is [pscustomobject])
+                    {
+                        $output.($name) = (ConvertToHash $value)
+                    }
+                    else
+                    {
+                        $output.($name) = $value
+                    }
+                }
+
+                $output
+            }
+
+            $customObject = ConvertFrom-Json -InputObject $json -Depth 5
+            return ConvertToHash $customObject
+        ";
 
         #endregion
 
-        #region Static Constructor
+        #region Properties
 
-        static BaseLocalSecretStore()
+        public static string SecretManagementLocalPath
         {
-            Instance = new LocalSecretStore();
+            get { return SMLocalPath; }
         }
 
         #endregion
-    
+
+        #region Methods
+
+        public static Hashtable ConvertJsonToHashtable(string json)
+        {
+            var results = PowerShellInvoker.InvokeScript<Hashtable>(
+                script: ConvertJsonToHashtableScript,
+                args: new object[] { json },
+                error: out Exception _);
+
+            return (results.Count > 0) ? results[0] : null;
+        }
+
+        public static PSObject ConvertJsonToPSObject(string json)
+        {
+            var results = PowerShellInvoker.InvokeScript<PSObject>(
+                script: @"param ([string] $json) ConvertFrom-Json -InputObject $json -Depth 5",
+                args: new object[] { json },
+                error: out Exception _);
+
+            return (results.Count > 0) ? results[0] : null;
+        }
+
+        public static string ConvertHashtableToJson(Hashtable hashtable)
+        {
+            var results = PowerShellInvoker.InvokeScript<string>(
+                script: @"param ([hashtable] $hashtable) ConvertTo-Json -InputObject $hashtable -Depth 5",
+                args: new object[] { hashtable },
+                error: out Exception _);
+
+            return (results.Count > 0) ? results[0] : null;
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region SecureStore
+
+    internal static class CryptoUtils
+    {
+        #region Public methods
+
+        public static byte[] GenerateKey()
+        {
+            using (var aes = Aes.Create())
+            {
+                return aes.Key;
+            }
+        }
+
+        public static byte[] EncryptWithKey(
+            SecureString passWord,
+            byte[] key,
+            byte[] data)
+        {
+            var keyToUse = (passWord != null) ?
+                DeriveFromKey(passWord, key) :
+                key;
+
+            using (var aes = Aes.Create())
+            {
+                aes.IV = new byte[16];      // Set IV to zero
+                aes.Key = keyToUse;
+                using (var encryptor = aes.CreateEncryptor())
+                using (var sourceStream = new MemoryStream(data))
+                using (var targetStream = new MemoryStream())
+                {
+                    using (var cryptoStream = new CryptoStream(targetStream, encryptor, CryptoStreamMode.Write))
+                    {
+                        sourceStream.CopyTo(cryptoStream);
+                    }
+
+                    return targetStream.ToArray();
+                }
+            }
+        }
+
+        public static byte[] DecryptWithKey(
+            SecureString passWord,
+            byte[] key,
+            byte[] data)
+        {
+            var keyToUse = (passWord != null) ?
+                DeriveFromKey(passWord, key) :
+                key;
+            
+            using (var aes = Aes.Create())
+            {
+                aes.IV = new byte[16];      // Set IV to zero
+                aes.Key = keyToUse;
+                using (var decryptor = aes.CreateDecryptor())
+                using (var sourceStream = new MemoryStream(data))
+                using (var targetStream = new MemoryStream())
+                {
+                    using (var cryptoStream = new CryptoStream(sourceStream, decryptor, CryptoStreamMode.Read))
+                    {
+                        cryptoStream.CopyTo(targetStream);
+                    }
+
+                    return targetStream.ToArray();
+                }
+            }
+        }
+
+        public static void ZeroOutData(byte[] data)
+        {
+            for (int i = 0; i < data.Length; i++)
+            {
+                data[i] = 0;
+            }
+        }
+
+        #endregion
+
+        #region Private methods
+
+        private static byte[] DeriveFromKey(
+            SecureString passWord,
+            byte[] key)
+        {
+            var passWordData = GetDataFromSecureString(passWord);
+            try
+            {
+                var derivedBytes = new Rfc2898DeriveBytes(passWordData, key, 1000);
+                return derivedBytes.GetBytes(key.Length);
+            }
+            finally
+            {
+                ZeroOutData(passWordData);
+            }
+        }
+
+        private static byte[] GetDataFromSecureString(SecureString secureString)
+        {
+            IntPtr ptr = Marshal.SecureStringToCoTaskMemUnicode(secureString);
+            if (ptr == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Unable to read secure string.");
+            }
+
+            try
+            {
+                var data = new byte[secureString.Length * 2];
+                Marshal.Copy(ptr, data, 0, data.Length);
+                return data;
+            }
+            finally
+            {
+                Marshal.ZeroFreeCoTaskMemUnicode(ptr);
+            }
+        }
+
+        #endregion
+    }
+
+    internal enum SecureStoreScope
+    {
+        Local = 1,
+        Machine
+    }
+
+    internal sealed class SecureStoreConfig
+    {
         #region Properties
 
-        public static BaseLocalSecretStore Instance
+        public SecureStoreScope Scope 
+        {
+            get;
+            private set;
+        }
+
+        public bool PasswordRequired
+        {
+            get;
+            private set;
+        }
+
+        public int PasswordTimeout
+        {
+            get;
+            private set;
+        }
+
+        public bool DoNotPrompt
         {
             get;
             private set;
@@ -53,275 +275,1294 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #endregion
 
-        #region Abstract methods
+        #region Constructor
 
-        //
-        // Vault methods currently support the following types
-        //
-        // byte[] (blob)
-        // string
-        // SecureString
-        // PSCredential
-        // Hashtable
-        //   Dictionary<string, object>
-        //   ,where object type is: byte[], string, SecureString, Credential
-        //
+        private SecureStoreConfig()
+        {
+        }
 
-        /// <summary>
-        /// Writes an object to the local secret vault for the current logged on user.
-        /// </summary>
-        /// <param name="name">Name of object to write.</param>
-        /// <param name="objectToWrite">Object to write to vault.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True on successful write.</returns>
-        public abstract bool WriteObject<T>(
-            string name,
-            T objectToWrite,
-            ref int errorCode);
-        
-        /// <summary>
-        /// Reads an object from the local secret vault for the current logged on user.
-        /// </summary>
-        /// <param name="name">Name of object to read from vault.</param>
-        /// <param name="outObject">Object read from vault.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True on successful read.</returns>
-        public abstract bool ReadObject(
-            string name,
-            out object outObject,
-            ref int errorCode);
+        public SecureStoreConfig(
+            SecureStoreScope scope,
+            bool passwordRequired,
+            int passwordTimeout,
+            bool doNotPrompt)
+        {
+            Scope = scope;
+            PasswordRequired = passwordRequired;
+            PasswordTimeout = passwordTimeout;
+            DoNotPrompt = doNotPrompt;
+        }
 
-        /// <summary>
-        /// Enumerate objects in the vault based on the current user and filter parameter, 
-        /// and return information about each object but not the object itself.
-        /// </summary>
-        /// <param name="filter">Search string for object enumeration.</param>
-        /// <param name="outSecretInfo">Array of SecretInformation objects.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True when objects are found.</returns>
-        public abstract bool EnumerateObjectInfo(
-            string filter,
-            out SecretInformation[] outSecretInfo,
-            ref int errorCode);
-
-        /// <summary>
-        /// Delete vault object.
-        /// </summary>
-        /// <param name="name">Name of vault item to delete.</param>
-        /// <param name="errorCode">Error code or zero.</param>
-        /// <returns>True if object successfully deleted.</returns>
-        public abstract bool DeleteObject(
-            string name,
-            ref int errorCode);
-
-        /// <summary>
-        /// Returns an error message based on provided error code.
-        /// </summary>
-        /// <param name="errorCode">Error code.</param>
-        /// <returns>Error message.</returns>
-        public abstract string GetErrorMessage(int errorCode);
+        public SecureStoreConfig(
+            string json)
+        {
+            ConvertFromJson(json);
+        }
 
         #endregion
+
+        # region Public methods
+
+        public string ConvertToJson()
+        {
+            // Config data
+            var configHashtable = new Hashtable();
+            configHashtable.Add(
+                key: "StoreScope",
+                value: Scope);
+            configHashtable.Add(
+                key: "PasswordRequired",
+                value: PasswordRequired);
+            configHashtable.Add(
+                key: "PasswordTimeout",
+                value: PasswordTimeout);
+            configHashtable.Add(
+                key: "DoNotPrompt",
+                value: DoNotPrompt);
+
+            var dataDictionary = new Hashtable();
+            dataDictionary.Add(
+                key: "ConfigData",
+                value: configHashtable);
+
+            return Utils.ConvertHashtableToJson(dataDictionary);
+        }
+
+        #endregion
+
+        #region Private methods
+
+        private void ConvertFromJson(string json)
+        {
+            dynamic configDataObj = (Utils.ConvertJsonToPSObject(json));
+            Scope = (SecureStoreScope) configDataObj.ConfigData.StoreScope;
+            PasswordRequired = (bool) configDataObj.ConfigData.PasswordRequired;
+            PasswordTimeout = (int) configDataObj.ConfigData.PasswordTimeout;
+            DoNotPrompt = (bool) configDataObj.ConfigData.DoNotPrompt;
+        }
+
+        #endregion
+
+        #region Static methods
+
+        public static SecureStoreConfig GetDefault()
+        {
+            return new SecureStoreConfig(
+                scope: SecureStoreScope.Local,
+                passwordRequired: true,
+                passwordTimeout: -1,
+                doNotPrompt: false);
+        }
+
+        #endregion
+    }
+
+    internal sealed class SecureStoreMetadata
+    {
+        #region Properties
+
+        public string Name
+        {
+            get;
+            private set;
+        }
+
+        public string TypeName
+        {
+            get;
+            private set;
+        }
+
+        public int Offset
+        {
+            get;
+            set;
+        }
+
+        public int Size
+        {
+            get;
+            private set;
+        }
+
+        public ReadOnlyDictionary<string, object> Attributes
+        {
+            get;
+            private set;
+        }
+
+        #endregion
+
+        #region Constructor
+
+        private SecureStoreMetadata()
+        {
+        }
+
+        public SecureStoreMetadata(
+            string name,
+            string typeName,
+            int offset,
+            int size,
+            ReadOnlyDictionary<string, object> attributes)
+        {
+            Name = name;
+            TypeName = typeName;
+            Offset = offset;
+            Size = size;
+            Attributes = attributes;
+        }
+
+        #endregion
+    }
+
+    internal sealed class SecureStoreData
+    {
+        #region Properties
+
+        internal byte[] Key { get; set; }
+        internal byte[] Blob { get; set; }
+        internal Dictionary<string, SecureStoreMetadata> MetaData { get; set; }
+
+        #endregion
+
+        #region Constructor
+
+        public SecureStoreData()
+        {
+        }
+
+        public SecureStoreData(
+            byte[] key,
+            string json,
+            byte[] blob)
+        {
+            Key = key;
+            Blob = blob;
+            ConvertJsonToMeta(json);
+        }
+
+        #endregion
+        
+        #region Public methods
+
+        // Example of store data as Hashtable
+        /*
+        @{
+        ConfigData =
+            @{
+                StoreScope='LocalScope'
+                PasswordRequired=$true
+                PasswordTimeout=-1,
+                DoNotPrompt=$false
+            }
+            MetaData =
+            @(
+                @{Name='TestSecret1'; Type='SecureString'; Offset=14434; Size=5000; Attributes=@{}}
+                @{Name='TestSecret2'; Type='String'; Offset=34593; Size=5100; Attributes=@{}}
+                @{Name='TestSecret3'; Type='PSCredential'; Offset=59837; Size=4900; Attributes=@{UserName='UserA'}}
+                @{Name='TestSecret4'; Type='Hashtable'; Offset=77856; Size=3500; Attributes=@{Element1='SecretElement1'; Element2='SecretElement2'}}
+            )
+        }
+        */
+
+        public string ConvertMetaToJson()
+        {
+            // Meta data array
+            var listMetadata = new List<Hashtable>(MetaData.Count);
+            foreach (var item in MetaData.Values)
+            {
+                var metaHashtable = new Hashtable();
+                metaHashtable.Add(
+                    key: "Name",
+                    value: item.Name);
+                metaHashtable.Add(
+                    key: "Type",
+                    value: item.TypeName);
+                metaHashtable.Add(
+                    key: "Offset",
+                    value: item.Offset);
+                metaHashtable.Add(
+                    key: "Size",
+                    value: item.Size);
+                metaHashtable.Add(
+                    key: "Attributes",
+                    value: item.Attributes);
+                
+                listMetadata.Add(metaHashtable);
+            }
+            
+            var dataDictionary = new Hashtable();
+            dataDictionary.Add(
+                key: "MetaData",
+                value: listMetadata.ToArray());
+            
+            return Utils.ConvertHashtableToJson(dataDictionary);
+        }
+
+        public void Clear()
+        {
+            if (Key != null)
+            {
+                CryptoUtils.ZeroOutData(Key);
+            }
+
+            if (Blob != null)
+            {
+                CryptoUtils.ZeroOutData(Blob);
+            }
+
+            if (MetaData != null)
+            {
+                MetaData.Clear();
+            }
+        }
+
+        #endregion
+
+        #region Private methods
+
+        // Example meta data json
+        /*
+            "MetaData": [
+            {
+                "Name": "TestSecret1",
+                "Type": "String",
+                "Offset": 34593,
+                "Size": 3500,
+                "Attributes": {}
+            },
+            {
+                "Name": "TestSecret2",
+                "Type": "PSCredential",
+                "Offset": 59837,
+                "Size": 4200,
+                "Attributes": {
+                    "UserName": "UserA"
+                },
+            }
+            ]
+        }
+        */
+
+        private void ConvertJsonToMeta(string json)
+        {
+            dynamic data = Utils.ConvertJsonToPSObject(json);
+
+            // Validate
+            if (data == null)
+            {
+                throw new InvalidDataException("The data from the local secure store is unusable.");
+            }
+
+            // Meta data
+            dynamic metaDataArray = data.MetaData;
+            MetaData = new Dictionary<string, SecureStoreMetadata>(
+                metaDataArray.Length,
+                StringComparer.CurrentCultureIgnoreCase);
+            foreach (var item in metaDataArray)
+            {
+                var attributesDictionary = new Dictionary<string, object>();
+                var attributes = item.Attributes;
+                foreach (var prop in ((PSObject)attributes).Properties)
+                {
+                    attributesDictionary.Add(
+                        key: prop.Name,
+                        value: prop.Value);
+                }
+
+                MetaData.Add(
+                    key: item.Name,
+                    value: new SecureStoreMetadata(
+                        name: item.Name,
+                        typeName: item.Type,
+                        offset: (int) item.Offset,
+                        size: (int) item.Size,
+                        attributes: new ReadOnlyDictionary<string, object>(attributesDictionary)));
+            }
+        }
+
+        #endregion
+    }
+
+    internal sealed class SecureStorePasswordException : InvalidOperationException
+    {
+        #region Constructor
+
+        public SecureStorePasswordException()
+            : base("Password is required to access local store.")
+        {
+        }
+
+        #endregion
+    }
+
+    // TODO:
+    //  a. Add support for SM local store password prompt
+    //  b. Add support for SM local store configuration (password)
+    //  c. Add auto update
+    //  d. Add support for SM local store configuration (scope)
+    //  e. Add Disposed check (?)
+    //  f. Add local store only tests
+    //  g. Create AzKeyVault extension vault for demo
+    //  h. [DONE] Integrate into LocalStore
+    //  i. [DONE] Test with current tests
+
+    internal sealed class SecureStore : IDisposable
+    {
+        #region Members
+
+        private SecureString _password;
+        private SecureStoreData _data;
+        private SecureStoreConfig _configData;
+        private Timer _passwordTimer;
+        private readonly object _syncObject = new object();
+
+        #endregion
+
+        #region Properties
+
+        public SecureStoreData Data
+        {
+            get
+            {
+                return _data;
+            }
+        }
+
+        public SecureStoreConfig ConfigData
+        {
+            get
+            {
+                return _configData;
+            }
+        }
+
+        internal SecureString Password
+        {
+            get 
+            {
+                lock (_syncObject)
+                {
+                    if (ConfigData.PasswordRequired && (_password == null))
+                    {
+                        throw new SecureStorePasswordException();
+                    }
+
+                    return (_password != null) ? _password.Copy() : null;
+                }
+            }
+        }
+
+        #endregion
+
+        #region Constructor
+
+        public SecureStore(
+            SecureStoreData data,
+            SecureStoreConfig configData,
+            SecureString password = null)
+        {
+            _data = data;
+            _configData = configData;
+            _password = password;
+        }
+
+        #endregion
+
+        #region IDisposable
+
+        public void Dispose()
+        {
+            _passwordTimer?.Dispose();
+            _password?.Clear();
+            _data?.Clear();
+        }
+
+        #endregion
+        
+        #region Public methods
+
+        public void SetPassword(
+            SecureString password,
+            int timeoutMilliseconds = -1)
+        {
+            int passwordTimeout;
+            lock (_syncObject)
+            {
+                _password = password;
+                passwordTimeout = _configData.PasswordTimeout;
+            }
+
+            if (passwordTimeout > 0)
+            {
+                _passwordTimer = new Timer(
+                    callback: (_) => 
+                        { 
+                            lock (_syncObject)
+                            {
+                                _password = null;
+                            }
+                        },
+                    state: null,
+                    dueTime: passwordTimeout,
+                    period: Timeout.Infinite);
+            }
+        }
+
+        public bool WriteBlob(
+            string name,
+            byte[] blob,
+            string typeName,
+            Dictionary<string, object> attributes,
+            ref string errorMsg)
+        {
+            if (EnumerateBlobs(
+                filter: name,
+                metaData: out SecureStoreMetadata[] _,
+                ref errorMsg))
+            {
+                return ReplaceBlobImpl(
+                    name,
+                    blob,
+                    typeName,
+                    attributes,
+                    ref errorMsg);
+            }
+
+            return WriteBlobImpl(
+                name,
+                blob,
+                typeName,
+                attributes,
+                ref errorMsg);
+        }
+
+        public bool ReadBlob(
+            string name,
+            out byte[] blob,
+            out SecureStoreMetadata metaData,
+            ref string errorMsg)
+        {
+            byte[] encryptedBlob = null;
+            byte[] key = null;
+            lock (_syncObject)
+            {
+                // Get blob
+                if (!_data.MetaData.TryGetValue(
+                    key: name,
+                    value: out metaData))
+                {
+                    errorMsg = string.Format(
+                        CultureInfo.InvariantCulture,
+                        @"Unable to read item {0}.",
+                        name);
+                    blob = null;
+                    metaData = null;
+                    return false;
+                }
+
+                key = _data.Key;
+                var offset = metaData.Offset;
+                var size = metaData.Size;
+                encryptedBlob = new byte[size];
+                Buffer.BlockCopy(_data.Blob, offset, encryptedBlob, 0, size);
+            }
+            
+            // Decrypt blob
+            var password = Password;
+            try
+            {
+                blob = CryptoUtils.DecryptWithKey(
+                    passWord: password,
+                    key: key,
+                    data: encryptedBlob);
+            }
+            finally
+            {
+                if (password != null)
+                {
+                    password.Clear();
+                }
+            }
+
+            return true;
+        }
+
+        public bool EnumerateBlobs(
+            string filter,
+            out SecureStoreMetadata[] metaData,
+            ref string errorMsg)
+        {
+            var filterPattern = new WildcardPattern(
+                pattern: filter,
+                options: WildcardOptions.IgnoreCase);
+            var foundBlobs = new List<SecureStoreMetadata>();
+
+            lock (_syncObject)
+            {
+                foreach (var key in _data.MetaData.Keys)
+                {
+                    if (filterPattern.IsMatch(key))
+                    {
+                        var data = _data.MetaData[key];
+                        foundBlobs.Add(
+                            new SecureStoreMetadata(
+                                name: data.Name,
+                                typeName: data.TypeName,
+                                offset: data.Offset,
+                                size: data.Size,
+                                attributes: data.Attributes));
+                    }
+                }
+            }
+
+            metaData = foundBlobs.ToArray();
+            return (metaData.Length > 0);
+        }
+
+        public bool DeleteBlob(
+            string name,
+            ref string errorMsg)
+        {
+            lock (_syncObject)
+            {
+                if (!_data.MetaData.TryGetValue(
+                    key: name,
+                    value: out SecureStoreMetadata metaData))
+                {
+                    errorMsg = string.Format(
+                        CultureInfo.InvariantCulture,
+                        @"Unable to find item {0} for removal.",
+                        name);
+                    return false;
+                }
+                _data.MetaData.Remove(name);
+
+                // Create new blob
+                var oldBlob = _data.Blob;
+                var offset = metaData.Offset;
+                var size = metaData.Size;
+                var newSize = (oldBlob.Length - size);
+                var newBlob = new byte[newSize];
+                Buffer.BlockCopy(oldBlob, 0, newBlob, 0, offset);
+                Buffer.BlockCopy(oldBlob, (offset + size), newBlob, offset, (newSize - offset));
+                _data.Blob = newBlob;
+                CryptoUtils.ZeroOutData(oldBlob);
+
+                // Fix up meta data offsets
+                foreach (var metaItem in _data.MetaData.Values)
+                {
+                    if (metaItem.Offset > offset)
+                    {
+                        metaItem.Offset -= size;
+                    }
+                }
+            }
+
+            // Write to file
+            var password = Password;
+            try
+            {
+                return SecureStoreFile.WriteFile(
+                    password: password,
+                    data: _data,
+                    ref errorMsg);
+            }
+            finally
+            {
+                if (password != null)
+                {
+                    password.Clear();
+                }
+            }
+        }
+
+        public bool UpdateConfigData(
+            SecureStoreConfig configData,
+            ref string errorMsg)
+        {
+            lock (_syncObject)
+            {
+                _configData = configData;
+                return true;
+            }
+
+            // TODO: Implement configuration helper method(s) that will:
+            //  a. Update blob data to re-encrypt with/without password
+            //  b. ???
+        }
+
+        public bool UpdateFromFile(ref string errorMsg)
+        {
+            if (!SecureStoreFile.ReadFile(
+                password: Password,
+                data: out SecureStoreData data,
+                ref errorMsg))
+            {
+                return false;
+            }
+            
+            lock (_syncObject)
+            {
+                _data = data;
+            }
+
+            return true;
+        }
+
+        #endregion
+
+        #region Private methods
+
+        private bool WriteBlobImpl(
+            string name,
+            byte[] blob,
+            string typeName,
+            Dictionary<string, object> attributes,
+            ref string errorMsg)
+        {
+            var password = Password;
+            try
+            {
+                var newData = new SecureStoreData();
+                newData.MetaData = _data.MetaData;
+                newData.Key = _data.Key;
+
+                // Encrypt blob
+                var blobToWrite = CryptoUtils.EncryptWithKey(
+                    passWord: password,
+                    key: _data.Key,
+                    data: blob);
+
+                lock (_syncObject)
+                {
+                    // Create new store blob
+                    var oldBlob = _data.Blob;
+                    var offset = oldBlob.Length;
+                    var newBlob = new byte[offset + blobToWrite.Length];
+                    Buffer.BlockCopy(oldBlob, 0, newBlob, 0, offset);
+                    Buffer.BlockCopy(blobToWrite, 0, newBlob, offset, blobToWrite.Length);
+                    newData.Blob = newBlob;
+
+                    // Create new meta item
+                    newData.MetaData.Add(
+                        key: name,
+                        value: new SecureStoreMetadata(
+                            name: name,
+                            typeName: typeName,
+                            offset: offset,
+                            size: blobToWrite.Length,
+                            attributes: new ReadOnlyDictionary<string, object>(attributes)));
+
+                    // Update store data
+                    _data = newData;
+                    CryptoUtils.ZeroOutData(oldBlob);
+                }
+
+                // Write to file
+                return SecureStoreFile.WriteFile(
+                    password: password,
+                    data: _data,
+                    ref errorMsg);
+            }
+            finally
+            {
+                if (password != null)
+                {
+                    password.Clear();
+                }
+            }
+        }
+
+        private bool ReplaceBlobImpl(
+            string name,
+            byte[] blob,
+            string typeName,
+            Dictionary<string, object> attributes,
+            ref string errorMsg)
+        {
+            lock (_syncObject)
+            {
+                // Remove old blob
+                if (!DeleteBlob(
+                    name: name,
+                    ref errorMsg))
+                {
+                    errorMsg = "Unable to replace existing store item, error: " + errorMsg;
+                    return false;
+                }
+
+                // Add new blob
+                return WriteBlobImpl(
+                    name: name,
+                    blob: blob,
+                    typeName: typeName,
+                    attributes: attributes,
+                    ref errorMsg);
+            }
+        }
+
+        #endregion
+
+        #region Static methods
+
+        public static SecureStore GetDefault()
+        {
+            var data = new SecureStoreData()
+            {
+                Key = CryptoUtils.GenerateKey(),
+                Blob = new byte[0],
+                MetaData = new Dictionary<string, SecureStoreMetadata>(StringComparer.InvariantCultureIgnoreCase)
+            };
+
+            return new SecureStore(
+                data: data,
+                configData: SecureStoreConfig.GetDefault());
+        }
+
+        public static SecureStore GetStore(
+            SecureString password)
+        {
+            string errorMsg = "";
+
+            // Read config from file.
+            SecureStoreConfig configData;
+            if (!SecureStoreFile.ReadConfigFile(
+                configData: out configData,
+                errorMsg: ref errorMsg))
+            {
+                if (errorMsg.Equals("NoConfigFile", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (SecureStoreFile.StoreFileExists())
+                    {
+                        // This indicates a corrupted store configuration or inadvertent file deletion.
+                        // TODO: Throw an error that explains the configuration must be set to correct
+                        // settings needed for store, or must re-create local store.
+                        throw new InvalidOperationException("Secure local store is in inconsistent state.  TODO: Provide user instructions.");
+                    }
+
+                    // First time, use default configuration.
+                    configData = SecureStoreConfig.GetDefault();
+                    if (!SecureStoreFile.WriteConfigFile(
+                        configData,
+                        ref errorMsg))
+                    {
+                        throw new PSInvalidOperationException(
+                            string.Format(CultureInfo.InvariantCulture, 
+                            @"Unable to write store configuration data to file with error: {0}", errorMsg));
+                    }
+                }
+            }
+            
+            // Enforce required password configuration.
+            if (configData.PasswordRequired && (password == null))
+            {
+                throw new SecureStorePasswordException();
+            }
+
+            // Read store from file.
+            if (SecureStoreFile.ReadFile(
+                password: password,
+                data: out SecureStoreData data,
+                ref errorMsg))
+            {
+                return new SecureStore(
+                    data: data, 
+                    configData: configData,
+                    password: password);
+            }
+
+            // If no file, create a default store
+            if (errorMsg.Equals("NoFile", StringComparison.OrdinalIgnoreCase))
+            {
+                var secureStore = GetDefault();
+                if (!SecureStoreFile.WriteFile(
+                    password: password,
+                    data: secureStore.Data,
+                    ref errorMsg))
+                {
+                    throw new PSInvalidOperationException(
+                        string.Format(CultureInfo.InvariantCulture, 
+                        @"Unable to write store data to file with error: {0}", errorMsg));
+                }
+
+                secureStore.SetPassword(password);
+                return secureStore;
+            }
+
+            throw new PSInvalidOperationException(
+                string.Format(CultureInfo.InvariantCulture,
+                @"Unable to read store data from file with error: {0}", errorMsg));
+        }
+
+        #endregion
+    }
+
+    internal static class SecureStoreFile
+    {
+        #region Members
+
+        private static readonly string LocalStorePath = Path.Combine(Utils.SecretManagementLocalPath, ".localstore");
+        private static readonly string LocalStoreFilePath = Path.Combine(LocalStorePath, "storefile");
+        private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, "storeconfig");
+
+        private static readonly FileSystemWatcher _storeFileWatcher;
+        private static bool _allowAutoUpdate;
+
+        #endregion
+
+        #region Constructor
+
+        static SecureStoreFile()
+        {
+            if (!Directory.Exists(LocalStorePath))
+            {
+                Directory.CreateDirectory(LocalStorePath);
+            }
+
+            _storeFileWatcher = new FileSystemWatcher(LocalStorePath);
+            _storeFileWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName;
+            _storeFileWatcher.Filter = "LocalStore";
+            _storeFileWatcher.EnableRaisingEvents = true;
+            _storeFileWatcher.Changed += (sender, args) => { UpdateData(); };
+            _storeFileWatcher.Created += (sender, args) => { UpdateData(); };
+            _storeFileWatcher.Deleted += (sender, args) => { UpdateData(fileDeleted: true); };
+
+            _allowAutoUpdate = true;
+        }
+
+        #endregion
+
+        #region Events
+
+        public static event EventHandler<FileUpdateEventArgs> FileUpdated;
+        private static void RaiseFileUpdatedEvent(FileUpdateEventArgs args)
+        {
+            if (FileUpdated != null)
+            {
+                FileUpdated.Invoke(null, args);
+            }
+        }
+
+        #endregion
+
+        #region Public methods
+
+        // File structure
+        /*
+        int:    key blob size
+        int:    json blob size
+        byte[]: key blob
+        byte[]: json blob
+        byte[]: data blob
+        */
+
+        public static bool WriteFile(
+            SecureString password,
+            SecureStoreData data,
+            ref string errorMsg)
+        {
+            var count = 0;
+            Exception exFail = null;
+            do
+            {
+                _allowAutoUpdate = false;
+
+                try
+                {
+                    // Encrypt json meta data.
+                    var jsonStr = data.ConvertMetaToJson();
+                    var jsonBlob = CryptoUtils.EncryptWithKey(
+                        passWord: password,
+                        key: data.Key,
+                        data: Encoding.UTF8.GetBytes(jsonStr));
+
+                    using (var fileStream = File.OpenWrite(LocalStoreFilePath))
+                    {
+                        fileStream.Seek(0, 0);
+
+                        // Write blob sizes
+                        var intSize = sizeof(Int32);
+                        var keyBlobSize = data.Key.Length;
+                        var jsonBlobSize = jsonBlob.Length;
+                        byte[] intField = BitConverter.GetBytes(keyBlobSize);
+                        fileStream.Write(intField, 0, intSize);
+                        intField = BitConverter.GetBytes(jsonBlobSize);
+                        fileStream.Write(intField, 0, intSize);
+                        
+                        // Write key blob
+                        fileStream.Write(data.Key, 0, keyBlobSize);
+
+                        // Write json blob
+                        fileStream.Write(jsonBlob, 0, jsonBlobSize);
+
+                        // Write data blob
+                        fileStream.Write(data.Blob, 0, data.Blob.Length);
+
+                        if (fileStream.Position != fileStream.Length)
+                        {
+                            fileStream.SetLength(fileStream.Position);
+                        }
+
+                        return true;
+                    }
+                }
+                catch (IOException exIO)
+                {
+                    // Make up to four attempts.
+                    exFail = exIO;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error.
+                    exFail = ex;
+                    break;
+                }
+                finally
+                {
+                    _allowAutoUpdate = true;
+                }
+
+                System.Threading.Thread.Sleep(250);
+
+            } while (++count < 4);
+
+            errorMsg = string.Format(
+                CultureInfo.InvariantCulture,
+                @"Unable to write to local store file with error: {0}",
+                exFail.Message);
+
+            return false;
+        }
+
+        public static bool ReadFile(
+            SecureString password,
+            out SecureStoreData data,
+            ref string errorMsg)
+        {
+            data = null;
+
+            if (!File.Exists(LocalStoreFilePath))
+            {
+                errorMsg = "NoFile";
+                return false;
+            }
+
+            // Open and read from file stream
+            var count = 0;
+            Exception exFail = null;
+            do
+            {
+                try
+                {
+                    using (var fileStream = File.OpenRead(LocalStoreFilePath))
+                    {
+                        // Read offsets
+                        var intSize = sizeof(Int32);
+                        byte[] intField = new byte[intSize];
+                        fileStream.Read(intField, 0, intSize);
+                        var keyBlobSize = BitConverter.ToInt32(intField, 0);
+                        fileStream.Read(intField, 0, intSize);
+                        var jsonBlobSize = BitConverter.ToInt32(intField, 0);
+
+                        // Read key blob
+                        byte[] keyBlob = new byte[keyBlobSize];
+                        fileStream.Read(keyBlob, 0, keyBlobSize);
+
+                        // Read json blob and decrypt
+                        byte[] jsonBlob = new byte[jsonBlobSize];
+                        fileStream.Read(jsonBlob, 0, jsonBlobSize);
+                        var jsonStr = Encoding.UTF8.GetString(
+                            CryptoUtils.DecryptWithKey(
+                                passWord: password,
+                                key: keyBlob,
+                                jsonBlob));
+
+                        // Read data blob
+                        var dataBlobSize = (int) (fileStream.Length - (keyBlobSize + jsonBlobSize + (intSize * 2 )));
+                        byte[] dataBlob = new byte[dataBlobSize];
+                        fileStream.Read(dataBlob, 0, dataBlobSize);
+
+                        data = new SecureStoreData(
+                            key: keyBlob,
+                            json: jsonStr,
+                            blob: dataBlob);
+
+                        return true;
+                    }
+                }
+                catch (IOException exIO)
+                {
+                    // Make up to four attempts.
+                    exFail = exIO;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error.
+                    exFail = ex;
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(250);
+
+            } while (++count < 4);
+
+            errorMsg = string.Format(
+                CultureInfo.InvariantCulture,
+                @"Unable to read from local store file with error: {0}",
+                exFail.Message);
+
+            return false;
+        }
+
+        public static bool WriteConfigFile(
+            SecureStoreConfig configData,
+            ref string errorMsg)
+        {
+            var count = 0;
+            Exception exFail = null;
+            do
+            {
+                try
+                {
+                    // Encrypt json meta data.
+                    var jsonStr = configData.ConvertToJson();
+                    File.WriteAllText(
+                        path: LocalConfigFilePath,
+                        contents: jsonStr);
+                
+                    return true;
+                }
+                catch (IOException exIO)
+                {
+                    // Make up to four attempts.
+                    exFail = exIO;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error.
+                    exFail = ex;
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(250);
+
+            } while (++count < 4);
+
+            errorMsg = string.Format(
+                CultureInfo.InvariantCulture,
+                @"Unable to write to local configuration file with error: {0}",
+                exFail.Message);
+
+            return false;
+        }
+
+        public static bool ReadConfigFile(
+            out SecureStoreConfig configData,
+            ref string errorMsg)
+        {
+            configData = null;
+
+            if ((!File.Exists(LocalConfigFilePath)))
+            {
+                errorMsg = "NoConfigFile";
+                return false;
+            }
+
+            // Open and read from file stream
+            var count = 0;
+            Exception exFail = null;
+            do
+            {
+                try
+                {
+                    var configJson = File.ReadAllText(LocalConfigFilePath);
+                    configData = new SecureStoreConfig(configJson);
+                    return true;
+                }
+                catch (IOException exIO)
+                {
+                    // Make up to four attempts.
+                    exFail = exIO;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error.
+                    exFail = ex;
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(250);
+
+            } while (++count < 4);
+
+            errorMsg = string.Format(
+                CultureInfo.InvariantCulture,
+                @"Unable to read from local store configuration file with error: {0}",
+                exFail.Message);
+
+            return false;
+        }
+
+        public static bool StoreFileExists()
+        {
+            return File.Exists(LocalStoreFilePath);
+        }
+
+        #endregion
+
+        #region Private methods
+
+        private static void UpdateData(bool fileDeleted = false)
+        {
+            if (_allowAutoUpdate)
+            {
+                RaiseFileUpdatedEvent(
+                    new FileUpdateEventArgs(fileDeleted));
+            }
+        }
+
+        #endregion
+    }
+
+    #region Event args
+
+    internal sealed class FileUpdateEventArgs : EventArgs
+    {
+        public bool FileDeleted
+        {
+            private set;
+            get;
+        }
+
+        public FileUpdateEventArgs(bool fileDeleted)
+        {
+            FileDeleted = fileDeleted;
+        }
     }
 
     #endregion
 
-#if !UNIX
-    #region CredMan
+    #endregion
 
-    /// <summary>
-    /// Windows Credential Manager (CredMan) native method PInvokes.
-    /// </summary>
-    internal static class NativeUtils
-    {
-        #region Constants
-
-        /// <summary>
-        /// CREDENTIAL Flags
-        /// </summary>
-        public enum CRED_FLAGS
-        {
-            PROMPT_NOW = 2,
-            USERNAME_TARGET = 4
-        }
-
-        /// <summary>
-        /// CREDENTIAL Types
-        /// </summary>
-        public enum CRED_TYPE
-        {
-            GENERIC = 1,
-            DOMAIN_PASSWORD = 2,
-            DOMAIN_CERTIFICATE = 3,
-            DOMAIN_VISIBLE_PASSWORD = 4,
-            GENERIC_CERTIFICATE = 5,
-            DOMAIN_EXTENDED = 6,
-            MAXIMUM = 7
-        }
-
-        /// <summary>
-        /// Credential Persist
-        /// </summary>
-        public enum CRED_PERSIST 
-        {
-            SESSION = 1,
-            LOCAL_MACHINE = 2,
-            ENTERPRISE = 3
-        }
-
-        // Credential Read/Write GetLastError errors (winerror.h)
-        public const uint PS_ERROR_BUFFER_TOO_LARGE = 1783;         // Error code 1783 seems to appear for too large buffer (2560 string characters)
-        public const uint ERROR_NO_SUCH_LOGON_SESSION = 1312;
-        public const uint ERROR_INVALID_PARAMETER = 87;
-        public const uint ERROR_INVALID_FLAGS = 1004;
-        public const uint ERROR_BAD_USERNAME = 2202;
-        public const uint ERROR_NOT_FOUND = 1168;
-        public const uint SCARD_E_NO_READERS_AVAILABLE = 0x8010002E;
-        public const uint SCARD_E_NO_SMARTCARD = 0x8010000C;
-        public const uint SCARD_W_REMOVED_CARD = 0x80100069;
-        public const uint SCARD_W_WRONG_CHV = 0x8010006B;
-
-        #endregion
-
-        #region Data structures
-
-        [StructLayout(LayoutKind.Sequential)]
-        public class CREDENTIALA
-        {
-            /// <summary>
-            /// Specifies characteristics of the credential.
-            /// </summary>
-            public uint Flags;
-
-            /// <summary>
-            /// Type of Credential.
-            /// </summary>
-            public uint Type;
-
-            /// <summary>
-            /// Name of the credential.
-            /// </summary>
-            [MarshalAsAttribute(UnmanagedType.LPWStr)]
-            public string TargetName;
-
-            /// <summary>
-            /// Comment string.
-            /// </summary>
-            [MarshalAsAttribute(UnmanagedType.LPWStr)]
-            public string Comment;
-
-            /// <summary>
-            /// Last modification of credential.
-            /// </summary>
-            public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
-
-            /// <summary>
-            /// Size of credential blob in bytes.
-            /// </summary>
-            public uint CredentialBlobSize;
-
-            /// <summary>
-            /// Secret data for credential.
-            /// </summary>
-            public IntPtr CredentialBlob;
-
-            /// <summary>
-            /// Defines persistence of credential.
-            /// </summary>
-            public uint Persist;
-
-            /// <summary>
-            /// Number of attributes associated with this credential.
-            /// </summary>
-            public uint AttributeCount;
-
-            /// <summary>
-            /// Application defined attributes for credential.
-            /// </summary>
-            public IntPtr Attributes;
-
-            /// <summary>
-            /// Alias for the target name (max size 256 characters).
-            /// </summary>
-            [MarshalAsAttribute(UnmanagedType.LPWStr)]
-            public string TargetAlias;
-
-            /// <summary>
-            /// User name of account for TargetName (max size 513 characters).
-            /// </summary>
-            [MarshalAsAttribute(UnmanagedType.LPWStr)]
-            public string UserName;
-        }
-
-        #endregion
-
-        #region Methods
-
-        [DllImport("Advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool CredWriteW(
-            IntPtr Credential,
-            uint Flags);
-
-        [DllImport("Advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool CredReadW(
-            [InAttribute()]
-            [MarshalAsAttribute(UnmanagedType.LPWStr)]
-            string TargetName,
-            int Type,
-            int Flags,
-            out IntPtr Credential);
-
-        [DllImport("Advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool CredDeleteW(
-            [InAttribute()]
-            [MarshalAsAttribute(UnmanagedType.LPWStr)]
-            string TargetName,
-            int Type,
-            int Flags);
-
-        [DllImport("Advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool CredEnumerateW(
-            [InAttribute()]
-            [MarshalAsAttribute(UnmanagedType.LPWStr)]
-            string Filter,
-            int Flags,
-            out int Count,
-            out IntPtr Credentials);
-
-        [DllImport("Advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool CredFree(
-            IntPtr Buffer);
-
-        #endregion
-    }
+    #region LocalSecretStore
 
     /// <summary>
     /// Default local secret store
     /// </summary>
-    internal class LocalSecretStore : BaseLocalSecretStore
+    internal sealed class LocalSecretStore
     {
-        #region Public method overrides
+        #region Members
 
-        public override bool WriteObject<T>(
+        private const string PSTag = "ps:";
+        private const string PSHashtableTag = "psht:";
+        private const string ByteArrayType = "ByteArrayType";
+        private const string StringType = "StringType";
+        private const string SecureStringType = "SecureStringType";
+        private const string PSCredentialType = "CredentialType";
+        private const string HashtableType = "HashtableType";
+        private const int MaxHashtableItemCount = 20;
+
+        private readonly SecureStore _secureStore;
+
+        private static object SyncObject;
+        private static LocalSecretStore LocalStore;
+        private static Dictionary<string, object> DefaultTag;
+
+        #endregion
+
+        #region Constructor
+
+        private LocalSecretStore()
+        {
+        }
+
+        public LocalSecretStore(
+            SecureStore secureStore)
+        {
+            _secureStore = secureStore;
+        }
+
+        static LocalSecretStore()
+        {
+            SyncObject = new object();
+
+            DefaultTag = new Dictionary<string, object>()
+                {
+                    { "Tag", "PSItem" }
+                };
+        }
+
+        #endregion
+
+        #region Public static
+
+        public static LocalSecretStore Instance
+        {
+            get
+            {
+                if (LocalStore == null)
+                {
+                    lock (SyncObject)
+                    {
+                        if (LocalStore == null)
+                        {
+                            // TODO: Remove after password cmdlets and prompt for password is added.
+                            var results = PowerShellInvoker.InvokeScript<SecureString>(
+                                script: @"param([string] $value) ConvertTo-SecureString -String $value -AsPlainText -Force",
+                                args: new object[] { "hello" },
+                                out ErrorRecord[] errors);
+                            var password = (results.Count > 0) ? results[0] : null;
+
+                            LocalStore = new LocalSecretStore(
+                                SecureStore.GetStore(password));
+                        }
+                    }
+                }
+
+                return LocalStore;
+            }
+        }
+
+        public static void SetPassword(
+            SecureString password)
+        {
+            if (LocalStore == null)
+            {
+                lock (SyncObject)
+                {
+                    if (LocalStore == null)
+                    {
+                        LocalStore = new LocalSecretStore(
+                            SecureStore.GetStore(password));
+                        return;
+                    }
+                }
+            }
+
+            LocalStore._secureStore.SetPassword(password);
+        }
+
+        #endregion
+
+        #region Public methods
+
+        public bool WriteObject<T>(
             string name,
             T objectToWrite,
-            ref int errorCode)
+            ref string errorMsg)
         {
             return WriteObjectImpl(
                 PrependTag(name),
                 objectToWrite,
-                ref errorCode);
+                ref errorMsg);
         }
 
-        private static bool WriteObjectImpl<T>(
+        private bool WriteObjectImpl<T>(
             string name,
             T objectToWrite,
-            ref int errorCode)
+            ref string errorMsg)
         {
             switch (objectToWrite)
             {
@@ -330,58 +1571,58 @@ namespace Microsoft.PowerShell.SecretManagement
                         name,
                         blobToWrite,
                         ByteArrayType,
-                        ref errorCode);
+                        ref errorMsg);
 
                 case string stringToWrite:
                     return WriteString(
                         name,
                         stringToWrite,
-                        ref errorCode);
+                        ref errorMsg);
 
                 case SecureString secureStringToWrite:
                     return WriteSecureString(
                         name,
                         secureStringToWrite,
-                        ref errorCode);
+                        ref errorMsg);
 
                 case PSCredential credentialToWrite:
                     return WritePSCredential(
                         name,
                         credentialToWrite,
-                        ref errorCode);
+                        ref errorMsg);
 
                 case Hashtable hashtableToWrite:
                     return WriteHashtable(
                         name,
                         hashtableToWrite,
-                        ref errorCode);
+                        ref errorMsg);
                 
                 default:
                     throw new InvalidOperationException("Invalid type. Types supported: byte[], string, SecureString, PSCredential, Hashtable");
             }
         }
 
-        public override bool ReadObject(
+        public bool ReadObject(
             string name,
             out object outObject,
-            ref int errorCode)
+            ref string errorMsg)
         {
             return ReadObjectImpl(
                 PrependTag(name),
                 out outObject,
-                ref errorCode);
+                ref errorMsg);
         }
 
-        private static bool ReadObjectImpl(
+        private bool ReadObjectImpl(
             string name,
             out object outObject,
-            ref int errorCode)
+            ref string errorMsg)
         {
             if (!ReadBlob(
                 name,
                 out byte[] outBlob,
                 out string typeName,
-                ref errorCode))
+                ref errorMsg))
             {
                 outObject = null;
                 return false;
@@ -413,22 +1654,22 @@ namespace Microsoft.PowerShell.SecretManagement
                         name,
                         outBlob,
                         out outObject,
-                        ref errorCode);
+                        ref errorMsg);
 
                 default:
                     throw new InvalidOperationException("Invalid type. Types supported: byte[], string, SecureString, PSCredential, Hashtable");
             }
         }
 
-        public override bool EnumerateObjectInfo(
+        public bool EnumerateObjectInfo(
             string filter,
             out SecretInformation[] outSecretInfo,
-            ref int errorCode)
+            ref string errorMsg)
         {
             if (!EnumerateBlobs(
                 PrependTag(filter),
                 out EnumeratedBlob[] outBlobs,
-                ref errorCode))
+                ref errorMsg))
             {
                 outSecretInfo = null;
                 return false;
@@ -479,24 +1720,21 @@ namespace Microsoft.PowerShell.SecretManagement
                                 vaultName: RegisterSecretVaultCommand.BuiltInLocalVault));
                         break;
                 }
-
-                // Delete local copy of blob.
-                ZeroOutData(item.Data);
             }
 
             outSecretInfo = outList.ToArray();
             return true;
         }
 
-        public override bool DeleteObject(
+        public bool DeleteObject(
             string name,
-            ref int errorCode)
+            ref string errorMsg)
         {
             // Hash tables are complex and require special processing.
             if (!ReadObject(
                 name,
                 out object outObject,
-                ref errorCode))
+                ref errorMsg))
             {
                 return false;
             }
@@ -508,51 +1746,12 @@ namespace Microsoft.PowerShell.SecretManagement
                 case Hashtable hashtable:
                     return DeleteHashtable(
                         name,
-                        ref errorCode);
+                        ref errorMsg);
 
                 default:
                     return DeleteBlob(
                         name,
-                        ref errorCode);
-            }
-        }
-
-        public override string GetErrorMessage(int errorCode)
-        {
-            switch ((uint)errorCode)
-            {
-                case NativeUtils.PS_ERROR_BUFFER_TOO_LARGE:
-                    return nameof(NativeUtils.PS_ERROR_BUFFER_TOO_LARGE);
-                
-                case NativeUtils.ERROR_BAD_USERNAME:
-                    return nameof(NativeUtils.ERROR_BAD_USERNAME);
-
-                case NativeUtils.ERROR_INVALID_FLAGS:
-                    return nameof(NativeUtils.ERROR_INVALID_FLAGS);
-
-                case NativeUtils.ERROR_INVALID_PARAMETER:
-                    return nameof(NativeUtils.ERROR_INVALID_PARAMETER);
-
-                case NativeUtils.ERROR_NOT_FOUND:
-                    return nameof(NativeUtils.ERROR_NOT_FOUND);
-
-                case NativeUtils.ERROR_NO_SUCH_LOGON_SESSION:
-                    return nameof(NativeUtils.ERROR_NO_SUCH_LOGON_SESSION);
-
-                case NativeUtils.SCARD_E_NO_READERS_AVAILABLE:
-                    return nameof(NativeUtils.SCARD_E_NO_READERS_AVAILABLE);
-
-                case NativeUtils.SCARD_E_NO_SMARTCARD:
-                    return nameof(NativeUtils.SCARD_E_NO_SMARTCARD);
-
-                case NativeUtils.SCARD_W_REMOVED_CARD:
-                    return nameof(NativeUtils.SCARD_W_REMOVED_CARD);
-
-                case NativeUtils.SCARD_W_WRONG_CHV:
-                    return nameof(NativeUtils.SCARD_W_WRONG_CHV);
-                
-                default:
-                    return string.Format(CultureInfo.InvariantCulture, "Unknown error code: {0}", errorCode);
+                        ref errorMsg);
             }
         }
 
@@ -644,202 +1843,102 @@ namespace Microsoft.PowerShell.SecretManagement
             return false;
         }
 
-        private static void ZeroOutData(byte[] data)
-        {
-            for (int i = 0; i < data.Length; i++)
-            {
-                data[i] = 0;
-            }
-        }
-
         #endregion
 
         #region Blob methods
 
-        private static bool WriteBlob(
+        private bool WriteBlob(
             string name,
             byte[] blob,
             string typeName,
-            ref int errorCode)
+            ref string errorMsg)
         {
-            bool success = false;
-            var blobHandle = GCHandle.Alloc(blob, GCHandleType.Pinned);
-            var credPtr = IntPtr.Zero;
-
-            try
-            {
-                var credential = new NativeUtils.CREDENTIALA();
-                credential.Type = (uint) NativeUtils.CRED_TYPE.GENERIC;
-                credential.TargetName = name;
-                credential.Comment = typeName;
-                credential.CredentialBlobSize = (uint) blob.Length;
-                credential.CredentialBlob = blobHandle.AddrOfPinnedObject();
-                credential.Persist = (uint) NativeUtils.CRED_PERSIST.LOCAL_MACHINE;
-
-                credPtr = Marshal.AllocHGlobal(Marshal.SizeOf(credential));
-                Marshal.StructureToPtr<NativeUtils.CREDENTIALA>(credential, credPtr, false);
-
-                success = NativeUtils.CredWriteW(
-                    Credential: credPtr, 
-                    Flags: 0);
-                
-                errorCode = Marshal.GetLastWin32Error();
-            }
-            finally
-            {
-                blobHandle.Free();
-                if (credPtr != IntPtr.Zero)
-                {
-                    Marshal.FreeHGlobal(credPtr);
-                }
-            }
-
-            return success;
+            return _secureStore.WriteBlob(
+                name: name,
+                blob: blob,
+                typeName: typeName,
+                attributes: DefaultTag,
+                errorMsg: ref errorMsg);
         }
 
-        private static bool ReadBlob(
+        private bool ReadBlob(
             string name,
             out byte[] blob,
             out string typeName,
-            ref int errorCode)
-        { 
-            blob = null;
-            typeName = null;
-            var success = false;
-
-            // Read Credential structure from vault given provided name.
-            IntPtr credPtr = IntPtr.Zero;
-            try
+            ref string errorMsg)
+        {
+            if (!_secureStore.ReadBlob(
+                name: name,
+                blob: out blob,
+                metaData: out SecureStoreMetadata metadata,
+                errorMsg: ref errorMsg))
             {
-                success = NativeUtils.CredReadW(
-                    TargetName: name,
-                    Type: (int) NativeUtils.CRED_TYPE.GENERIC,
-                    Flags: 0,
-                    Credential: out credPtr);
-
-                errorCode = Marshal.GetLastWin32Error();
-
-                if (success)
-                {
-                    // Copy returned credential to managed memory.
-                    var credential = Marshal.PtrToStructure<NativeUtils.CREDENTIALA>(credPtr);
-                    typeName = credential.Comment;
-
-                    // Copy returned blob from credential structure.
-                    var ansiString = Marshal.PtrToStringAnsi(
-                        ptr: credential.CredentialBlob,
-                        len: (int) credential.CredentialBlobSize);
-                    blob = Encoding.ASCII.GetBytes(ansiString);
-                }
+                typeName = null;
+                return false;
             }
-            finally
-            {
-                if (credPtr != IntPtr.Zero)
-                {
-                    NativeUtils.CredFree(credPtr);
-                }
-            }
-
-            return success;
+            
+            typeName = metadata.TypeName;
+            return true;
         }
 
         private struct EnumeratedBlob
         {
             public string Name;
             public string TypeName;
-            public byte[] Data;
         }
 
-        private static bool EnumerateBlobs(
+        private bool EnumerateBlobs(
             string filter,
             out EnumeratedBlob[] blobs,
-            ref int errorCode)
+            ref string errorMsg)
         {
-            blobs = null;
-            var success = false;
-
-            int count = 0;
-            IntPtr credPtrPtr = IntPtr.Zero;
-            try
+            if (!_secureStore.EnumerateBlobs(
+                filter: filter,
+                metaData: out SecureStoreMetadata[] metadata,
+                ref errorMsg))
             {
-                success = NativeUtils.CredEnumerateW(
-                    Filter: filter,
-                    Flags: 0,
-                    Count: out count,
-                    Credentials: out credPtrPtr);
+                blobs = null;
+                return false;
+            }
 
-                errorCode = Marshal.GetLastWin32Error();
-
-                if (success)
-                {
-                    List<EnumeratedBlob> blobArray = new List<EnumeratedBlob>(count);
-
-                    // The returned credPtrPtr is an array of credential pointers.
-                    for (int i=0; i<count; i++)
+            List<EnumeratedBlob> blobArray = new List<EnumeratedBlob>(metadata.Length);
+            foreach (var metaItem in metadata)
+            {
+                blobArray.Add(
+                    new EnumeratedBlob
                     {
-                        IntPtr credPtr = Marshal.ReadIntPtr(credPtrPtr, (i*IntPtr.Size));
-
-                        // Copy returned credential to managed memory.
-                        var credential = Marshal.PtrToStructure<NativeUtils.CREDENTIALA>(credPtr);
-
-                        if (credential.CredentialBlob != IntPtr.Zero)
-                        {
-                            // Copy returned blob from credential structure.
-                            var ansiString = Marshal.PtrToStringAnsi(
-                                ptr: credential.CredentialBlob,
-                                len: (int) credential.CredentialBlobSize);
-
-                            blobArray.Add(
-                                new EnumeratedBlob {
-                                    Name = credential.TargetName, 
-                                    TypeName = credential.Comment,
-                                    Data = Encoding.ASCII.GetBytes(ansiString)
-                                });
-                        }
-                    }
-
-                    blobs = blobArray.ToArray();
-                }
-            }
-            finally
-            {
-                if (credPtrPtr != IntPtr.Zero)
-                {
-                    NativeUtils.CredFree(credPtrPtr);
-                }
+                        Name = metaItem.Name,
+                        TypeName = metaItem.TypeName
+                    });
             }
 
-            return success;
+            blobs = blobArray.ToArray();
+            return true;
         }
 
-        private static bool DeleteBlob(
+        private bool DeleteBlob(
             string name,
-            ref int errorCode)
+            ref string errorMsg)
         {
-            var success = NativeUtils.CredDeleteW(
-                TargetName: name,
-                Type: (int) NativeUtils.CRED_TYPE.GENERIC,
-                Flags: 0);
-
-            errorCode = Marshal.GetLastWin32Error();
-
-            return success;
+            return _secureStore.DeleteBlob(
+                name: name,
+                errorMsg: ref errorMsg);
         }
 
         #endregion
 
         #region String methods
 
-        private static bool WriteString(
+        private bool WriteString(
             string name,
             string strToWrite,
-            ref int errorCode)
+            ref string errorMsg)
         {
             return WriteBlob(
                 name: name,
                 blob: Encoding.UTF8.GetBytes(strToWrite),
                 typeName: StringType,
-                errorCode: ref errorCode);
+                errorMsg: ref errorMsg);
         }
 
         private static bool ReadString(
@@ -864,10 +1963,10 @@ namespace Microsoft.PowerShell.SecretManagement
         //  ...
         //
 
-        private static bool WriteStringArray(
+        private bool WriteStringArray(
             string name,
             string[] strsToWrite,
-            ref int errorCode)
+            ref string errorMsg)
         {
             // Compute blob size
             int arrayCount = strsToWrite.Length;
@@ -917,7 +2016,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 name: name,
                 blob: blob,
                 typeName: HashtableType,
-                errorCode: ref errorCode);
+                errorMsg: ref errorMsg);
         }
 
         private static void ReadStringArray(
@@ -945,10 +2044,10 @@ namespace Microsoft.PowerShell.SecretManagement
     
         #region SecureString methods
 
-        private static bool WriteSecureString(
+        private bool WriteSecureString(
             string name,
             SecureString strToWrite,
-            ref int errorCode)
+            ref string errorMsg)
         {
             if (GetDataFromSecureString(
                 secureString: strToWrite,
@@ -960,11 +2059,11 @@ namespace Microsoft.PowerShell.SecretManagement
                         name: name,
                         blob: data,
                         typeName: SecureStringType,
-                        errorCode: ref errorCode);
+                        errorMsg: ref errorMsg);
                 }
                 finally
                 {
-                    ZeroOutData(data);
+                    CryptoUtils.ZeroOutData(data);
                 }
             }
             
@@ -987,7 +2086,7 @@ namespace Microsoft.PowerShell.SecretManagement
             }
             finally
             {
-                ZeroOutData(ssBlob);
+                CryptoUtils.ZeroOutData(ssBlob);
             }
 
             outSecureString = null;
@@ -1005,10 +2104,10 @@ namespace Microsoft.PowerShell.SecretManagement
         //      <password>  Contains Password SecureString bytes    Length: ssData bytes
         //
 
-        private static bool WritePSCredential(
+        private bool WritePSCredential(
             string name,
             PSCredential credential,
-            ref int errorCode)
+            ref string errorMsg)
         {
             if (GetDataFromSecureString(
                 secureString: credential.Password,
@@ -1047,15 +2146,15 @@ namespace Microsoft.PowerShell.SecretManagement
                         name: name,
                         blob: blob,
                         typeName: PSCredentialType,
-                        errorCode: ref errorCode);
+                        errorMsg: ref errorMsg);
                 }
                 finally
                 {
-                    ZeroOutData(ssData);
+                    CryptoUtils.ZeroOutData(ssData);
 
                     if (blob != null)
                     {
-                        ZeroOutData(blob);
+                        CryptoUtils.ZeroOutData(blob);
                     }
                 }
             }
@@ -1094,11 +2193,11 @@ namespace Microsoft.PowerShell.SecretManagement
             }
             finally
             {
-                ZeroOutData(blob);
+                CryptoUtils.ZeroOutData(blob);
                 
                 if (ssData != null)
                 {
-                    ZeroOutData(ssData);
+                    CryptoUtils.ZeroOutData(ssData);
                 }
             }
 
@@ -1124,10 +2223,10 @@ namespace Microsoft.PowerShell.SecretManagement
         //   ...
         //
     
-        private static bool WriteHashtable(
+        private bool WriteHashtable(
             string name,
             Hashtable hashtable,
-            ref int errorCode)
+            ref string errorMsg)
         {
             // Impose size limit
             if (hashtable.Count > MaxHashtableItemCount)
@@ -1174,7 +2273,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (!WriteStringArray(
                 name: name,
                 strsToWrite: hashTableEntryNames.ToArray(),
-                errorCode: ref errorCode))
+                errorMsg: ref errorMsg))
             {
                 return false;
             }
@@ -1188,7 +2287,7 @@ namespace Microsoft.PowerShell.SecretManagement
                     success = WriteObjectImpl(
                         name: entry.Key,
                         objectToWrite: entry.Value,
-                        errorCode: ref errorCode);
+                        errorMsg: ref errorMsg);
                     
                     if (!success)
                     {
@@ -1204,27 +2303,27 @@ namespace Microsoft.PowerShell.SecretManagement
                 {
                     // Roll back.
                     // Remove any Hashtable secret that was written, ignore errors.
-                    int error = 0;
+                    string error = "";
                     foreach (var entry in entries)
                     {
                         DeleteBlob(
                             name: entry.Key,
-                            errorCode: ref error);
+                            errorMsg: ref error);
                     }
 
                     // Remove the Hashtable member names.
                     DeleteBlob(
                         name: name,
-                        ref error);
+                        errorMsg: ref error);
                 }
             }
         }
 
-        private static bool ReadHashtable(
+        private bool ReadHashtable(
             string name,
             byte[] blob,
             out object outHashtable,
-            ref int errorCode)
+            ref string errorMsg)
         {
             // Get array of Hashtable secret names.
             ReadStringArray(
@@ -1238,7 +2337,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 if (ReadObjectImpl(
                     entryName,
                     out object outObject,
-                    ref errorCode))
+                    ref errorMsg))
                 {
                     hashtable.Add(
                     RecoverKeyname(entryName, name),
@@ -1250,16 +2349,16 @@ namespace Microsoft.PowerShell.SecretManagement
             return true;
         }
 
-        private static bool DeleteHashtable(
+        private bool DeleteHashtable(
             string name,
-            ref int errorCode)
+            ref string errorMsg)
         {
             // Get array of Hashtable secret names.
             if (!ReadBlob(
                 name,
                 out byte[] blob,
                 out string typeName,
-                ref errorCode))
+                ref errorMsg))
             {
                 return false;
             }
@@ -1273,13 +2372,13 @@ namespace Microsoft.PowerShell.SecretManagement
             {
                 DeleteBlob(
                     name: entryName,
-                    ref errorCode);
+                    ref errorMsg);
             }
 
             // Delete the Hashtable secret names list.
             DeleteBlob(
                 name: name,
-                ref errorCode);
+                ref errorMsg);
 
             return true;
         }
@@ -1290,13 +2389,6 @@ namespace Microsoft.PowerShell.SecretManagement
     }
 
     #endregion
-#else
-    #region Keyring
-
-    // TODO: Implement via Gnome Keyring
-
-    #endregion
-#endif
 
     #region Enums
 
@@ -2164,11 +3256,11 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             if (!string.IsNullOrEmpty(VaultParametersName))
             {
-                int errorCode = 0;
+                string errorMsg = "";
                 if (LocalSecretStore.Instance.ReadObject(
                     name: VaultParametersName,
                     outObject: out object outObject,
-                    ref errorCode))
+                    ref errorMsg))
                 {
                     if (outObject is Hashtable hashtable)
                     {
@@ -2184,11 +3276,11 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             if (!string.IsNullOrEmpty(paramsName))
             {
-                int errorCode = 0;
+                string errorMsg = "";
                 if (LocalSecretStore.Instance.ReadObject(
                     paramsName,
                     out object outObject,
-                    ref errorCode))
+                    ref errorMsg))
                 {
                     var hashtable = outObject as Hashtable;
                     var dictionary = new Dictionary<string, object>(hashtable.Count);
@@ -2217,51 +3309,8 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Strings
 
-        private const string ConvertJsonToHashtableScript = @"
-            param (
-                [string] $json
-            )
-
-            function ConvertToHash
-            {
-                param (
-                    [pscustomobject] $object
-                )
-
-                $output = @{}
-                $object | Get-Member -MemberType NoteProperty | ForEach-Object {
-                    $name = $_.Name
-                    $value = $object.($name)
-
-                    if ($value -is [object[]])
-                    {
-                        $array = @()
-                        $value | ForEach-Object {
-                            $array += (ConvertToHash $_)
-                        }
-                        $output.($name) = $array
-                    }
-                    elseif ($value -is [pscustomobject])
-                    {
-                        $output.($name) = (ConvertToHash $value)
-                    }
-                    else
-                    {
-                        $output.($name) = $value
-                    }
-                }
-
-                $output
-            }
-
-            $customObject = ConvertFrom-Json $json
-            return ConvertToHash $customObject
-        ";
-
-        private static readonly string RegistryDirectoryPath =  Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + 
-            @"\Microsoft\PowerShell\SecretVaultRegistry";
-
-        private static readonly string RegistryFilePath = RegistryDirectoryPath + @"\VaultInfo";
+        private static readonly string RegistryDirectoryPath = Path.Combine(Utils.SecretManagementLocalPath, "SecretVaultRegistry");
+        private static readonly string RegistryFilePath = Path.Combine(RegistryDirectoryPath, "VaultInfo");
 
         #endregion
 
@@ -2411,16 +3460,6 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
-        private static Hashtable ConvertJsonToHashtable(string json)
-        {
-            var results = PowerShellInvoker.InvokeScript<Hashtable>(
-                script: ConvertJsonToHashtableScript,
-                args: new object[] { json },
-                error: out Exception _);
-
-            return results[0];
-        }
-
         /// <summary>
         /// Reads the current user secret vault registry information from file.
         /// </summary>
@@ -2429,7 +3468,7 @@ namespace Microsoft.PowerShell.SecretManagement
         private static bool TryReadSecretVaultRegistry(
             out Hashtable vaultInfo)
         {
-            vaultInfo = new Hashtable();
+            vaultInfo = null;
 
             if (!File.Exists(RegistryFilePath))
             {
@@ -2442,7 +3481,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 try
                 {
                     string jsonInfo = File.ReadAllText(RegistryFilePath);
-                    vaultInfo = ConvertJsonToHashtable(jsonInfo);
+                    vaultInfo = Utils.ConvertJsonToHashtable(jsonInfo);
                     return true;
                 }
                 catch (IOException)
@@ -2479,11 +3518,7 @@ namespace Microsoft.PowerShell.SecretManagement
         /// <param>Hashtable containing registered vault information.</param>
         private static void WriteSecretVaultRegistry(Hashtable dataToWrite)
         {
-            var results = PowerShellInvoker.InvokeScript<string>(
-                script: @"param ([hashtable] $dataToWrite) ConvertTo-Json $dataToWrite",
-                args: new object[] { dataToWrite },
-                error: out Exception _);
-            string jsonInfo = results[0];
+            string jsonInfo = Utils.ConvertHashtableToJson(dataToWrite);
 
             _allowAutoRefresh = false;
             try
