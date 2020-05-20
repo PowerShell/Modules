@@ -115,6 +115,146 @@ namespace Microsoft.PowerShell.SecretManagement
             return (results.Count > 0) ? results[0] : null;
         }
 
+        public static SecureString ConvertToSecureString(string secret)
+        {
+            var results = PowerShellInvoker.InvokeScript<SecureString>(
+                script: @"param([string] $value) ConvertTo-SecureString -String $value -AsPlainText -Force",
+                args: new object[] { secret },
+                error: out Exception _);
+            
+            return (results.Count > 0) ? results[0] : null;
+        }
+
+        public static bool GetSecureStringFromData(
+            byte[] data,
+            out SecureString outSecureString)
+        {
+            if ((data.Length % 2) != 0)
+            {
+                Dbg.Assert(false, "Blob length for SecureString secure must be even.");
+                outSecureString = null;
+                return false;
+            }
+
+            outSecureString = new SecureString();
+            var strLen = data.Length / 2;
+            for (int i=0; i < strLen; i++)
+            {
+                int index = (2 * i);
+
+                var ch = (char)(data[index + 1] * 256 + data[index]);
+                outSecureString.AppendChar(ch);
+            }
+
+            return true;
+        }
+
+        public static bool GetDataFromSecureString(
+            SecureString secureString,
+            out byte[] data)
+        {
+            IntPtr ptr = Marshal.SecureStringToCoTaskMemUnicode(secureString);
+
+            if (ptr != IntPtr.Zero)
+            {
+                try
+                {
+                    data = new byte[secureString.Length * 2];
+                    Marshal.Copy(ptr, data, 0, data.Length);
+                    return true;
+                }
+                finally
+                {
+                    Marshal.ZeroFreeCoTaskMemUnicode(ptr);
+                }
+            }
+
+            data = null;
+            return false;
+        }
+
+        private static bool ComparePasswords(
+            SecureString password1,
+            SecureString password2)
+        {
+            byte[] data1 = null;
+            byte[] data2 = null;
+            var passwordEqual = false;
+            try
+            {
+                if (!GetDataFromSecureString(
+                    password1,
+                    out data1))
+                {
+                    return false;
+                }
+
+                if (!GetDataFromSecureString(
+                    password2,
+                    out data2))
+                {
+                    return false;
+                }
+
+                passwordEqual = (data1.Length == data2.Length);
+                if (passwordEqual)
+                {
+                    for (int i=0; i<data1.Length; i++)
+                    {
+                        if (data1[i] != data2[i])
+                        {
+                            passwordEqual = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                if (data1 != null)
+                {
+                    CryptoUtils.ZeroOutData(data1);
+                }
+
+                if (data2 != null)
+                {
+                    CryptoUtils.ZeroOutData(data2);
+                }
+            }
+
+            return passwordEqual;
+        }
+
+        public static SecureString PromptForPassword(
+            PSCmdlet cmdlet)
+        {
+            SecureString password = null;
+            var isVerified = false;
+
+            cmdlet.WriteObject("A password is required for Secret Management module local store");
+
+            do
+            {
+                // Initial prompt
+                cmdlet.WriteObject("Enter password:");
+                password = cmdlet.Host.UI.ReadLineAsSecureString();
+
+                // Verification prompt
+                cmdlet.WriteObject("Enter password again for verification:");
+                var passwordVerified = cmdlet.Host.UI.ReadLineAsSecureString();
+
+                isVerified = ComparePasswords(password, passwordVerified);
+
+                if (!isVerified)
+                {
+                    cmdlet.WriteObject("\nThe two entered passwords do not match.  Please re-enter the passwords.\n");
+                }
+
+            } while (!isVerified);
+
+            return password;
+        }
+
         #endregion
     }
 
@@ -180,7 +320,15 @@ namespace Microsoft.PowerShell.SecretManagement
                 {
                     using (var cryptoStream = new CryptoStream(sourceStream, decryptor, CryptoStreamMode.Read))
                     {
-                        cryptoStream.CopyTo(targetStream);
+                        try
+                        {
+                            cryptoStream.CopyTo(targetStream);
+                        }
+                        catch (CryptographicException)
+                        {
+                            // TODO: Think about whether this is the right user experience.
+                            throw new SecureStorePasswordException();
+                        }
                     }
 
                     return targetStream.ToArray();
@@ -594,6 +742,11 @@ namespace Microsoft.PowerShell.SecretManagement
         {
         }
 
+        public SecureStorePasswordException(string msg)
+            : base(msg)
+        {
+        }
+
         #endregion
     }
 
@@ -683,6 +836,9 @@ namespace Microsoft.PowerShell.SecretManagement
         
         #region Public methods
 
+        /// <summary>
+        /// Sets the current session password, and resets the password timeout.
+        /// </summary>
         public void SetPassword(
             SecureString password,
             int timeoutMilliseconds = -1)
@@ -708,6 +864,39 @@ namespace Microsoft.PowerShell.SecretManagement
                     dueTime: passwordTimeout,
                     period: Timeout.Infinite);
             }
+
+            // Validate password
+            string errorMsg = "";
+            bool success;
+            try
+            {
+                success = SecureStoreFile.ReadFile(
+                    password: password,
+                    out SecureStoreData _,
+                    ref errorMsg);
+            }
+            catch (SecureStorePasswordException)
+            {
+                success = false;
+            }
+            if (!success)
+            {
+                throw new SecureStorePasswordException(
+                    "The provided password for the local store is incorrect.");
+            }
+        }
+
+        /// <summary>
+        /// Updates the store password to the new value provided.
+        /// Re-encrypts secret data and store file with new password.
+        /// </summary>
+        public bool UpdatePassword(
+            SecureString newpassword,
+            SecureString oldPassword,
+            ref string errorMsg)
+        {
+            // TODO: Implement.
+            throw new PSNotImplementedException();
         }
 
         public bool WriteBlob(
@@ -1498,50 +1687,36 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Public static
 
-        public static LocalSecretStore Instance
+        public static LocalSecretStore GetInstance(
+            SecureString password = null,
+            PSCmdlet cmdlet = null)
         {
-            get
-            {
-                if (LocalStore == null)
-                {
-                    lock (SyncObject)
-                    {
-                        if (LocalStore == null)
-                        {
-                            // TODO: Remove after password cmdlets and prompt for password is added.
-                            var results = PowerShellInvoker.InvokeScript<SecureString>(
-                                script: @"param([string] $value) ConvertTo-SecureString -String $value -AsPlainText -Force",
-                                args: new object[] { "hello" },
-                                out ErrorRecord[] errors);
-                            var password = (results.Count > 0) ? results[0] : null;
 
-                            LocalStore = new LocalSecretStore(
-                                SecureStore.GetStore(password));
-                        }
-                    }
-                }
-
-                return LocalStore;
-            }
-        }
-
-        public static void SetPassword(
-            SecureString password)
-        {
             if (LocalStore == null)
             {
                 lock (SyncObject)
                 {
                     if (LocalStore == null)
                     {
-                        LocalStore = new LocalSecretStore(
-                            SecureStore.GetStore(password));
-                        return;
+                        try
+                        {
+                            LocalStore = new LocalSecretStore(
+                                SecureStore.GetStore(password));
+                        }
+                        catch (SecureStorePasswordException)
+                        {
+                            if (cmdlet != null)
+                            {
+                                password = Utils.PromptForPassword(cmdlet);
+                                LocalStore = new LocalSecretStore(
+                                    SecureStore.GetStore(password));
+                            }
+                        }
                     }
                 }
             }
 
-            LocalStore._secureStore.SetPassword(password);
+            return LocalStore;
         }
 
         #endregion
@@ -1755,6 +1930,22 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
+        public void SetPassword(SecureString password)
+        {
+            _secureStore.SetPassword(password);
+        }
+
+        public bool UpdatePassword(
+            SecureString newPassword,
+            SecureString oldPassword,
+            ref string errorMsg)
+        {
+            return _secureStore.UpdatePassword(
+                newPassword,
+                oldPassword,
+                ref errorMsg);
+        }
+
         #endregion
 
         #region Private methods
@@ -1793,54 +1984,6 @@ namespace Microsoft.PowerShell.SecretManagement
             string hashName)
         {
             return str.Substring((PSHashtableTag + hashName).Length);
-        }
-
-        private static bool GetSecureStringFromData(
-            byte[] data,
-            out SecureString outSecureString)
-        {
-            if ((data.Length % 2) != 0)
-            {
-                Dbg.Assert(false, "Blob length for SecureString secure must be even.");
-                outSecureString = null;
-                return false;
-            }
-
-            outSecureString = new SecureString();
-            var strLen = data.Length / 2;
-            for (int i=0; i < strLen; i++)
-            {
-                int index = (2 * i);
-
-                var ch = (char)(data[index + 1] * 256 + data[index]);
-                outSecureString.AppendChar(ch);
-            }
-
-            return true;
-        }
-
-        private static bool GetDataFromSecureString(
-            SecureString secureString,
-            out byte[] data)
-        {
-            IntPtr ptr = Marshal.SecureStringToCoTaskMemUnicode(secureString);
-
-            if (ptr != IntPtr.Zero)
-            {
-                try
-                {
-                    data = new byte[secureString.Length * 2];
-                    Marshal.Copy(ptr, data, 0, data.Length);
-                    return true;
-                }
-                finally
-                {
-                    Marshal.ZeroFreeCoTaskMemUnicode(ptr);
-                }
-            }
-
-            data = null;
-            return false;
         }
 
         #endregion
@@ -2049,7 +2192,7 @@ namespace Microsoft.PowerShell.SecretManagement
             SecureString strToWrite,
             ref string errorMsg)
         {
-            if (GetDataFromSecureString(
+            if (Utils.GetDataFromSecureString(
                 secureString: strToWrite,
                 data: out byte[] data))
             {
@@ -2076,7 +2219,7 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             try
             {
-                if (GetSecureStringFromData(
+                if (Utils.GetSecureStringFromData(
                     data: ssBlob, 
                     outSecureString: out SecureString outString))
                 {
@@ -2109,7 +2252,7 @@ namespace Microsoft.PowerShell.SecretManagement
             PSCredential credential,
             ref string errorMsg)
         {
-            if (GetDataFromSecureString(
+            if (Utils.GetDataFromSecureString(
                 secureString: credential.Password,
                 data: out byte[] ssData))
             {
@@ -2183,7 +2326,7 @@ namespace Microsoft.PowerShell.SecretManagement
                     ssData[index++] = blob[i];
                 }
 
-                if (GetSecureStringFromData(
+                if (Utils.GetSecureStringFromData(
                     ssData,
                     out SecureString secureString))
                 {
@@ -3257,7 +3400,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (!string.IsNullOrEmpty(VaultParametersName))
             {
                 string errorMsg = "";
-                if (LocalSecretStore.Instance.ReadObject(
+                if (LocalSecretStore.GetInstance().ReadObject(
                     name: VaultParametersName,
                     outObject: out object outObject,
                     ref errorMsg))
@@ -3277,7 +3420,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (!string.IsNullOrEmpty(paramsName))
             {
                 string errorMsg = "";
-                if (LocalSecretStore.Instance.ReadObject(
+                if (LocalSecretStore.GetInstance().ReadObject(
                     paramsName,
                     out object outObject,
                     ref errorMsg))
