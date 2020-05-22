@@ -1230,16 +1230,16 @@ namespace Microsoft.PowerShell.SecretManagement
 
     #region Local store cmdlets
 
-    #region Set-LocalStorePassword
+    #region Unlock-LocalStore
 
     /// <summary>
     /// Sets the local store password for the current session.
     /// Password will remain in effect for the session until the timeout expires.
     /// The password timeout is set in the local store configuration.
     /// </summary>
-    [Cmdlet(VerbsCommon.Set, "LocalStorePassword",
+    [Cmdlet(VerbsCommon.Unlock, "LocalStore",
         DefaultParameterSetName = SecureStringParameterSet)]
-    public sealed class SetLocalStorePasswordCommand : PSCmdlet
+    public sealed class UnlockLocalStoreCommand : PSCmdlet
     {
         #region Members
 
@@ -1269,11 +1269,10 @@ namespace Microsoft.PowerShell.SecretManagement
         protected override void EndProcessing()
         {
             var passwordToSet = (ParameterSetName == StringParameterSet) ? Utils.ConvertToSecureString(Password) : SecureStringPassword;
-            LocalSecretStore.GetInstance(password: passwordToSet).SetPassword(passwordToSet);
+            LocalSecretStore.GetInstance(password: passwordToSet).UnlockLocalStore(passwordToSet);
         }
 
         #endregion
-
     }
 
     #endregion
@@ -1284,17 +1283,21 @@ namespace Microsoft.PowerShell.SecretManagement
     /// Updates the local store password to the new password provided.
     /// </summary>
     [Cmdlet(VerbsData.Update, "LocalStorePassword",
-        DefaultParameterSetName = SecureStringParameterSet)]
+        DefaultParameterSetName = NoParameterSet)]
     public sealed class UpdateLocalStorePasswordCommand : PSCmdlet
     {
         #region Members
 
+        private const string NoParameterSet = "NoParameterSet";
         private const string StringParameterSet = "StringParameterSet";
         private const string SecureStringParameterSet = "SecureStringParameterSet";
 
         #endregion
 
         #region Parameters
+
+        [Parameter(ParameterSetName=NoParameterSet)]
+        public SwitchParameter PromptForPassword { get; set; } = true;
 
         [Parameter(Position=0, Mandatory=true, ValueFromPipeline=true, ParameterSetName=StringParameterSet)]
         public string NewPassword { get; set; }
@@ -1316,33 +1319,35 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             SecureString newPassword;
             SecureString oldPassword;
-            if (ParameterSetName == StringParameterSet)
+            switch (ParameterSetName)
             {
-                newPassword = Utils.ConvertToSecureString(NewPassword);
-                oldPassword = Utils.ConvertToSecureString(OldPassword);
-            }
-            else
-            {
-                newPassword = NewSecureStringPassword;
-                oldPassword = OldSecureStringPassword;
+                case StringParameterSet:
+                    newPassword = Utils.ConvertToSecureString(NewPassword);
+                    oldPassword = Utils.ConvertToSecureString(OldPassword);
+                    break;
+
+                case SecureStringParameterSet:
+                    newPassword = NewSecureStringPassword;
+                    oldPassword = OldSecureStringPassword;
+                    break;
+                
+                default:
+                    // NoParameterSet
+                    if (!PromptForPassword) { return; }
+                    oldPassword = Utils.PromptForPassword(
+                        cmdlet: this,
+                        verifyPassword: false,
+                        message: "Old password");
+                    newPassword = Utils.PromptForPassword(
+                        cmdlet: this,
+                        verifyPassword: true,
+                        message: "New password");
+                    break;
             }
 
-            var errorMsg = "";
-            if (!LocalSecretStore.GetInstance(password: oldPassword).UpdatePassword(
+            LocalSecretStore.GetInstance(password: oldPassword).UpdatePassword(
                 newPassword,
-                oldPassword,
-                ref errorMsg))
-            {
-                var msg = string.Format(CultureInfo.InvariantCulture,
-                    "Cannot update local store password with error: {0}",
-                    errorMsg);
-                WriteError(
-                    new ErrorRecord(
-                        new PSInvalidOperationException(msg),
-                        "CannotUpdateLocalStorePassword",
-                        ErrorCategory.InvalidOperation,
-                        this));
-            }
+                oldPassword);
         }
 
         #endregion
@@ -1357,6 +1362,13 @@ namespace Microsoft.PowerShell.SecretManagement
     #endregion
 
     #region Set-LocalStoreConfiguration
+
+
+
+    #endregion
+
+    #region Reset-LocalStore
+
 
 
 

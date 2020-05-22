@@ -87,40 +87,40 @@ namespace Microsoft.PowerShell.SecretManagement
 
         public static Hashtable ConvertJsonToHashtable(string json)
         {
-            var results = PowerShellInvoker.InvokeScript<Hashtable>(
+            var results = PowerShellInvoker.InvokeScriptCommon<Hashtable>(
                 script: ConvertJsonToHashtableScript,
                 args: new object[] { json },
-                error: out Exception _);
+                error: out ErrorRecord _);
 
             return (results.Count > 0) ? results[0] : null;
         }
 
         public static PSObject ConvertJsonToPSObject(string json)
         {
-            var results = PowerShellInvoker.InvokeScript<PSObject>(
+            var results = PowerShellInvoker.InvokeScriptCommon<PSObject>(
                 script: @"param ([string] $json) ConvertFrom-Json -InputObject $json -Depth 5",
                 args: new object[] { json },
-                error: out Exception _);
+                error: out ErrorRecord _);
 
             return (results.Count > 0) ? results[0] : null;
         }
 
         public static string ConvertHashtableToJson(Hashtable hashtable)
         {
-            var results = PowerShellInvoker.InvokeScript<string>(
+            var results = PowerShellInvoker.InvokeScriptCommon<string>(
                 script: @"param ([hashtable] $hashtable) ConvertTo-Json -InputObject $hashtable -Depth 5",
                 args: new object[] { hashtable },
-                error: out Exception _);
+                error: out ErrorRecord _);
 
             return (results.Count > 0) ? results[0] : null;
         }
 
         public static SecureString ConvertToSecureString(string secret)
         {
-            var results = PowerShellInvoker.InvokeScript<SecureString>(
+            var results = PowerShellInvoker.InvokeScriptCommon<SecureString>(
                 script: @"param([string] $value) ConvertTo-SecureString -String $value -AsPlainText -Force",
                 args: new object[] { secret },
-                error: out Exception _);
+                error: out ErrorRecord _);
             
             return (results.Count > 0) ? results[0] : null;
         }
@@ -226,30 +226,37 @@ namespace Microsoft.PowerShell.SecretManagement
         }
 
         public static SecureString PromptForPassword(
-            PSCmdlet cmdlet)
+            PSCmdlet cmdlet,
+            bool verifyPassword = false,
+            string message = null)
         {
             SecureString password = null;
-            var isVerified = false;
 
-            cmdlet.WriteObject("A password is required for Secret Management module local store");
+            cmdlet.WriteObject(
+                string.IsNullOrEmpty(message) ? 
+                    "A password is required for Secret Management module local store"
+                    : message);
 
+            var isVerified = !verifyPassword;
             do
             {
                 // Initial prompt
                 cmdlet.WriteObject("Enter password:");
                 password = cmdlet.Host.UI.ReadLineAsSecureString();
 
-                // Verification prompt
-                cmdlet.WriteObject("Enter password again for verification:");
-                var passwordVerified = cmdlet.Host.UI.ReadLineAsSecureString();
-
-                isVerified = ComparePasswords(password, passwordVerified);
-
-                if (!isVerified)
+                if (verifyPassword)
                 {
-                    cmdlet.WriteObject("\nThe two entered passwords do not match.  Please re-enter the passwords.\n");
-                }
+                    // Verification prompt
+                    cmdlet.WriteObject("Enter password again for verification:");
+                    var passwordVerified = cmdlet.Host.UI.ReadLineAsSecureString();
 
+                    isVerified = ComparePasswords(password, passwordVerified);
+
+                    if (!isVerified)
+                    {
+                        cmdlet.WriteObject("\nThe two entered passwords do not match.  Please re-enter the passwords.\n");
+                    }
+                }
             } while (!isVerified);
 
             return password;
@@ -326,7 +333,6 @@ namespace Microsoft.PowerShell.SecretManagement
                         }
                         catch (CryptographicException)
                         {
-                            // TODO: Think about whether this is the right user experience.
                             throw new SecureStorePasswordException();
                         }
                     }
@@ -498,7 +504,7 @@ namespace Microsoft.PowerShell.SecretManagement
             return new SecureStoreConfig(
                 scope: SecureStoreScope.Local,
                 passwordRequired: true,
-                passwordTimeout: -1,
+                passwordTimeout: 900000,    // 15 minute timeout
                 doNotPrompt: false);
         }
 
@@ -751,15 +757,16 @@ namespace Microsoft.PowerShell.SecretManagement
     }
 
     // TODO:
-    //  a. Add support for SM local store password prompt
-    //  b. Add support for SM local store configuration (password)
-    //  c. Add auto update
-    //  d. Add support for SM local store configuration (scope)
+    //  b. Add auto update
+    //  c. Add support for SM local store configuration (password)
+    //  d. Think about adding file back-up support
     //  e. Add Disposed check (?)
     //  f. Add local store only tests
     //  g. Create AzKeyVault extension vault for demo
-    //  h. [DONE] Integrate into LocalStore
-    //  i. [DONE] Test with current tests
+    //  h. Add support for SM local store configuration (scope)
+    //  a. [DONE] Add support for SM local store password prompt
+    //  i. [DONE] Integrate into LocalStore
+    //  j. [DONE] Test with current tests
 
     internal sealed class SecureStore : IDisposable
     {
@@ -770,6 +777,7 @@ namespace Microsoft.PowerShell.SecretManagement
         private SecureStoreConfig _configData;
         private Timer _passwordTimer;
         private readonly object _syncObject = new object();
+        private static TimeSpan _updateDelay = TimeSpan.FromSeconds(15);
 
         #endregion
 
@@ -818,7 +826,9 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             _data = data;
             _configData = configData;
-            _password = password;
+            SetPassword(password);
+
+            SecureStoreFile.FileUpdated += (sender, args) => HandleFileUpdateEvent(sender, args);
         }
 
         #endregion
@@ -839,10 +849,10 @@ namespace Microsoft.PowerShell.SecretManagement
         /// <summary>
         /// Sets the current session password, and resets the password timeout.
         /// </summary>
-        public void SetPassword(
-            SecureString password,
-            int timeoutMilliseconds = -1)
+        public void SetPassword(SecureString password)
         {
+            VerifyPasswordRequired();
+
             int passwordTimeout;
             lock (_syncObject)
             {
@@ -864,39 +874,61 @@ namespace Microsoft.PowerShell.SecretManagement
                     dueTime: passwordTimeout,
                     period: Timeout.Infinite);
             }
-
-            // Validate password
-            string errorMsg = "";
-            bool success;
-            try
-            {
-                success = SecureStoreFile.ReadFile(
-                    password: password,
-                    out SecureStoreData _,
-                    ref errorMsg);
-            }
-            catch (SecureStorePasswordException)
-            {
-                success = false;
-            }
-            if (!success)
-            {
-                throw new SecureStorePasswordException(
-                    "The provided password for the local store is incorrect.");
-            }
         }
 
         /// <summary>
         /// Updates the store password to the new value provided.
         /// Re-encrypts secret data and store file with new password.
         /// </summary>
-        public bool UpdatePassword(
+        public void UpdatePassword(
             SecureString newpassword,
-            SecureString oldPassword,
-            ref string errorMsg)
+            SecureString oldPassword)
         {
-            // TODO: Implement.
-            throw new PSNotImplementedException();
+            VerifyPasswordRequired();
+
+            lock (_syncObject)
+            {
+                // Verify password.
+                var errorMsg = "";
+                if (!SecureStoreFile.ReadFile(
+                    oldPassword,
+                    out SecureStoreData data,
+                    ref errorMsg))
+                {
+                    throw new SecureStorePasswordException("Unable to access local store with provided oldPassword.");
+                }
+
+                // Re-encrypt blob data with new password.
+                var newBlob = ReEncryptBlob(
+                    newPassword: newpassword,
+                    oldPassword: oldPassword,
+                    metaData: data.MetaData,
+                    key: data.Key,
+                    blob: data.Blob,
+                    outMetaData: out Dictionary<string, SecureStoreMetadata> newMetaData);
+
+                // Write data to file with new password.
+                var newData = new SecureStoreData()
+                {
+                    Key = data.Key,
+                    Blob = newBlob,
+                    MetaData = newMetaData
+                };
+
+                if (!SecureStoreFile.WriteFile(
+                    password: newpassword,
+                    data: newData,
+                    errorMsg: ref errorMsg))
+                {
+                    throw new PSInvalidOperationException(
+                        string.Format(CultureInfo.InvariantCulture,
+                            @"Unable to update password with error: {0}",
+                            errorMsg));
+                }
+
+                _data = newData;
+                SetPassword(newpassword);
+            }
         }
 
         public bool WriteBlob(
@@ -1082,27 +1114,101 @@ namespace Microsoft.PowerShell.SecretManagement
             //  b. ???
         }
 
-        public bool UpdateFromFile(ref string errorMsg)
+        public void UpdateFromFile()
         {
+            var errorMsg = "";
             if (!SecureStoreFile.ReadFile(
                 password: Password,
                 data: out SecureStoreData data,
                 ref errorMsg))
             {
-                return false;
+                throw new PSInvalidOperationException(errorMsg);
             }
             
             lock (_syncObject)
             {
                 _data = data;
             }
-
-            return true;
         }
 
         #endregion
 
         #region Private methods
+
+        private void HandleFileUpdateEvent(object sender, FileUpdateEventArgs args)
+        {
+            // This is a 'best effort' intent to keep the current session data in sync 
+            // with external changes.
+            // Only update if the reported change is after the latest write from this session.
+            try
+            {
+                var fileChangeTime = System.IO.File.GetLastWriteTime(args.FileChangedArgs.FullPath);
+                if ((fileChangeTime - SecureStoreFile.LastWriteTime) > _updateDelay)
+                {
+                    UpdateFromFile();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static byte[] ReEncryptBlob(
+            SecureString newPassword,
+            SecureString oldPassword,
+            Dictionary<string, SecureStoreMetadata> metaData,
+            byte[] key,
+            byte[] blob,
+            out Dictionary<string, SecureStoreMetadata> outMetaData)
+        {
+            if (blob.Length == 0)
+            {
+                outMetaData = metaData;
+                return blob;
+            }
+
+            outMetaData = new Dictionary<string, SecureStoreMetadata>(metaData.Count, StringComparer.InvariantCultureIgnoreCase);
+            List<byte> newBlobArray = new List<byte>(blob.Length);
+
+            int offset = 0;
+            foreach (var metaItem in metaData.Values)
+            {
+                var oldBlobItem = new byte[metaItem.Size];
+                Buffer.BlockCopy(blob, metaItem.Offset, oldBlobItem, 0, metaItem.Size);
+                var decryptedBlobItem = CryptoUtils.DecryptWithKey(
+                    passWord: oldPassword,
+                    key: key,
+                    data: oldBlobItem);
+                
+                byte[] newBlobItem;
+                try
+                {
+                    newBlobItem = CryptoUtils.EncryptWithKey(
+                        passWord: newPassword,
+                        key: key,
+                        data: decryptedBlobItem);
+                }
+                finally
+                {
+                    CryptoUtils.ZeroOutData(decryptedBlobItem);
+                }
+
+                outMetaData.Add(
+                    key: metaItem.Name,
+                    value: new SecureStoreMetadata(
+                        name: metaItem.Name,
+                        typeName: metaItem.TypeName,
+                        offset: offset,
+                        size: newBlobItem.Length,
+                        attributes: metaItem.Attributes));
+                    
+                newBlobArray.AddRange(newBlobItem);
+
+                offset += newBlobItem.Length;
+            }
+
+            return newBlobArray.ToArray();
+        }
 
         private bool WriteBlobImpl(
             string name,
@@ -1192,6 +1298,15 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
+        private void VerifyPasswordRequired()
+        {
+            if (!_configData.PasswordRequired)
+            {
+                throw new PSInvalidOperationException(
+                    "The local store is not configured to use a password.");
+            }
+        }
+
         #endregion
 
         #region Static methods
@@ -1226,7 +1341,6 @@ namespace Microsoft.PowerShell.SecretManagement
                     if (SecureStoreFile.StoreFileExists())
                     {
                         // This indicates a corrupted store configuration or inadvertent file deletion.
-                        // TODO: Throw an error that explains the configuration must be set to correct
                         // settings needed for store, or must re-create local store.
                         throw new InvalidOperationException("Secure local store is in inconsistent state.  TODO: Provide user instructions.");
                     }
@@ -1237,9 +1351,7 @@ namespace Microsoft.PowerShell.SecretManagement
                         configData,
                         ref errorMsg))
                     {
-                        throw new PSInvalidOperationException(
-                            string.Format(CultureInfo.InvariantCulture, 
-                            @"Unable to write store configuration data to file with error: {0}", errorMsg));
+                        throw new PSInvalidOperationException(errorMsg);
                     }
                 }
             }
@@ -1248,6 +1360,13 @@ namespace Microsoft.PowerShell.SecretManagement
             if (configData.PasswordRequired && (password == null))
             {
                 throw new SecureStorePasswordException();
+            }
+
+            // Check password configuration consistency.
+            if ((password != null) && !configData.PasswordRequired)
+            {
+                throw new PSInvalidOperationException(
+                    "The local store is not configured to use a password. First change the store configuration to require a password.");
             }
 
             // Read store from file.
@@ -1280,9 +1399,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 return secureStore;
             }
 
-            throw new PSInvalidOperationException(
-                string.Format(CultureInfo.InvariantCulture,
-                @"Unable to read store data from file with error: {0}", errorMsg));
+            throw new PSInvalidOperationException(errorMsg);
         }
 
         #endregion
@@ -1297,7 +1414,8 @@ namespace Microsoft.PowerShell.SecretManagement
         private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, "storeconfig");
 
         private static readonly FileSystemWatcher _storeFileWatcher;
-        private static bool _allowAutoUpdate;
+        private static DateTime _lastWriteTime;
+        private static object _syncObject;
 
         #endregion
 
@@ -1311,14 +1429,13 @@ namespace Microsoft.PowerShell.SecretManagement
             }
 
             _storeFileWatcher = new FileSystemWatcher(LocalStorePath);
-            _storeFileWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName;
-            _storeFileWatcher.Filter = "LocalStore";
+            _storeFileWatcher.NotifyFilter = NotifyFilters.LastWrite;
+            _storeFileWatcher.Filter = "storefile";
             _storeFileWatcher.EnableRaisingEvents = true;
-            _storeFileWatcher.Changed += (sender, args) => { UpdateData(); };
-            _storeFileWatcher.Created += (sender, args) => { UpdateData(); };
-            _storeFileWatcher.Deleted += (sender, args) => { UpdateData(fileDeleted: true); };
+            _storeFileWatcher.Changed += (sender, args) => { UpdateData(args); };
 
-            _allowAutoUpdate = true;
+            _syncObject = new object();
+            _lastWriteTime = DateTime.MinValue;
         }
 
         #endregion
@@ -1336,6 +1453,21 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #endregion
 
+        #region Properties
+
+        public static DateTime LastWriteTime
+        {
+            get
+            {
+                lock (_syncObject)
+                {
+                    return _lastWriteTime;
+                }
+            }
+        }
+
+        #endregion
+        
         #region Public methods
 
         // File structure
@@ -1356,8 +1488,6 @@ namespace Microsoft.PowerShell.SecretManagement
             Exception exFail = null;
             do
             {
-                _allowAutoUpdate = false;
-
                 try
                 {
                     // Encrypt json meta data.
@@ -1394,6 +1524,11 @@ namespace Microsoft.PowerShell.SecretManagement
                             fileStream.SetLength(fileStream.Position);
                         }
 
+                        lock (_syncObject)
+                        {
+                            _lastWriteTime = DateTime.Now;
+                        }
+
                         return true;
                     }
                 }
@@ -1407,10 +1542,6 @@ namespace Microsoft.PowerShell.SecretManagement
                     // Unexpected error.
                     exFail = ex;
                     break;
-                }
-                finally
-                {
-                    _allowAutoUpdate = true;
                 }
 
                 System.Threading.Thread.Sleep(250);
@@ -1603,13 +1734,9 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Private methods
 
-        private static void UpdateData(bool fileDeleted = false)
+        private static void UpdateData(FileSystemEventArgs args)
         {
-            if (_allowAutoUpdate)
-            {
-                RaiseFileUpdatedEvent(
-                    new FileUpdateEventArgs(fileDeleted));
-            }
+            RaiseFileUpdatedEvent(new FileUpdateEventArgs(args));
         }
 
         #endregion
@@ -1619,15 +1746,15 @@ namespace Microsoft.PowerShell.SecretManagement
 
     internal sealed class FileUpdateEventArgs : EventArgs
     {
-        public bool FileDeleted
+        public FileSystemEventArgs FileChangedArgs
         {
             private set;
             get;
         }
 
-        public FileUpdateEventArgs(bool fileDeleted)
+        public FileUpdateEventArgs(FileSystemEventArgs args)
         {
-            FileDeleted = fileDeleted;
+            FileChangedArgs = args;
         }
     }
 
@@ -1684,7 +1811,7 @@ namespace Microsoft.PowerShell.SecretManagement
         }
 
         #endregion
-
+    
         #region Public static
 
         public static LocalSecretStore GetInstance(
@@ -1930,20 +2057,26 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
-        public void SetPassword(SecureString password)
+        public void UnlockLocalStore(SecureString password)
         {
             _secureStore.SetPassword(password);
+            try
+            {
+                _secureStore.UpdateFromFile();
+            }
+            catch (SecureStorePasswordException)
+            {
+                throw new SecureStorePasswordException("Unable to unlock local store. Password is invalid.");
+            }
         }
 
-        public bool UpdatePassword(
+        public void UpdatePassword(
             SecureString newPassword,
-            SecureString oldPassword,
-            ref string errorMsg)
+            SecureString oldPassword)
         {
-            return _secureStore.UpdatePassword(
+            _secureStore.UpdatePassword(
                 newPassword,
-                oldPassword,
-                ref errorMsg);
+                oldPassword);
         }
 
         #endregion
@@ -3706,6 +3839,13 @@ namespace Microsoft.PowerShell.SecretManagement
 
     internal static class PowerShellInvoker
     {
+        #region Members
+
+        private static System.Management.Automation.PowerShell _powershell = 
+            System.Management.Automation.PowerShell.Create(RunspaceMode.NewRunspace);
+
+        #endregion
+
         #region Methods
 
         public static Collection<T> InvokeScript<T>(
@@ -3715,6 +3855,7 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             using (var powerShell = System.Management.Automation.PowerShell.Create())
             {
+                powerShell.Commands.Clear();
                 Collection<T> results;
                 try
                 {
@@ -3749,6 +3890,35 @@ namespace Microsoft.PowerShell.SecretManagement
                 out ErrorRecord[] errors);
             
             error = (errors.Length > 0) ? errors[0].Exception : null;
+            return results;
+        }
+
+        public static Collection<T> InvokeScriptCommon<T>(
+            string script,
+            object[] args,
+            out ErrorRecord error)
+        {
+            Collection<T> results;
+            try
+            {
+                results = _powershell.AddScript(script).AddParameters(args).Invoke<T>();
+                error = (_powershell.Streams.Error.Count > 0) ? _powershell.Streams.Error[0] : null;
+            }
+            catch (Exception ex)
+            {
+                error = new ErrorRecord(
+                    exception: ex,
+                    errorId: "PowerShellInvokerInvalidOperation",
+                    errorCategory: ErrorCategory.InvalidOperation,
+                    targetObject: null);
+                results = new Collection<T>();
+            }
+            finally
+            {
+                _powershell.Commands.Clear();
+                _powershell.Runspace.ResetRunspaceState();
+            }
+
             return results;
         }
 
