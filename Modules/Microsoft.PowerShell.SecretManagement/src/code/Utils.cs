@@ -393,7 +393,7 @@ namespace Microsoft.PowerShell.SecretManagement
         #endregion
     }
 
-    internal enum SecureStoreScope
+    public enum SecureStoreScope
     {
         Local = 1,
         Machine
@@ -1103,15 +1103,26 @@ namespace Microsoft.PowerShell.SecretManagement
             SecureStoreConfig configData,
             ref string errorMsg)
         {
+            SecureStoreConfig oldConfigData;
             lock (_syncObject)
             {
+                oldConfigData = _configData;
                 _configData = configData;
-                return true;
             }
 
-            // TODO: Implement configuration helper method(s) that will:
-            //  a. Update blob data to re-encrypt with/without password
-            //  b. ???
+            if (!SecureStoreFile.WriteConfigFile(
+                configData,
+                ref errorMsg))
+            {
+                lock(_syncObject)
+                {
+                    _configData = oldConfigData;
+                }
+
+                return false;
+            }
+
+            return true;
         }
 
         public void UpdateFromFile()
@@ -1788,6 +1799,22 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #endregion
 
+        #region Properties
+
+        public SecureStoreConfig Configuration
+        {
+            get
+            {
+                return new SecureStoreConfig(
+                    scope: _secureStore.ConfigData.Scope,
+                    passwordRequired: _secureStore.ConfigData.PasswordRequired,
+                    passwordTimeout: _secureStore.ConfigData.PasswordTimeout,
+                    doNotPrompt: _secureStore.ConfigData.DoNotPrompt);
+            }
+        }
+
+        #endregion
+        
         #region Constructor
 
         private LocalSecretStore()
@@ -2077,6 +2104,15 @@ namespace Microsoft.PowerShell.SecretManagement
             _secureStore.UpdatePassword(
                 newPassword,
                 oldPassword);
+        }
+
+        public bool UpdateConfiguration(
+            SecureStoreConfig newConfigData,
+            ref string errorMsg)
+        {
+            return _secureStore.UpdateConfigData(
+                newConfigData,
+                ref errorMsg);
         }
 
         #endregion

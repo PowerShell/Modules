@@ -1357,13 +1357,92 @@ namespace Microsoft.PowerShell.SecretManagement
 
     #region Get-LocalStoreConfiguration
 
+    [Cmdlet(VerbsCommon.Get, "LocalStoreConfiguration")]
+    public sealed class GetLocalStoreConfiguration : PSCmdlet
+    {
+        #region Overrides
 
+        protected override void EndProcessing()
+        {
+            WriteObject(
+                LocalSecretStore.GetInstance(cmdlet: this).Configuration);
+        }
+
+        #endregion
+    }
 
     #endregion
 
     #region Set-LocalStoreConfiguration
 
+    [Cmdlet(VerbsCommon.Set, "LocalStoreConfiguration")]
+    public sealed class SetLocalStoreConfiguration : PSCmdlet
+    {
+        #region Parameters
 
+        [Parameter(Position=0)]
+        public SecureStoreScope Scope { get; set; } = SecureStoreScope.Local;
+
+        [Parameter(Position=1)]
+        public SwitchParameter RequirePassword { get; set; } = true;
+
+        [Parameter(Position=2)]
+        [ValidateRange(10, (Int32.MaxValue / 1000))]
+        public int PasswordTimeoutSeconds { get; set; } = 90000;
+
+        [Parameter(Position=3)]
+        public SwitchParameter DoNotPrompt { get; set; } = false;
+
+        #endregion
+
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            if (Scope == SecureStoreScope.Machine)
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSNotSupportedException("Machine scope is not yet supported."),
+                        errorId: "LocalStoreConfigurationNotSupported",
+                        errorCategory: ErrorCategory.NotEnabled,
+                        this));
+            }
+
+            bool requirePassword = (RequirePassword.IsPresent) ? (bool)RequirePassword : true;
+            int passwordTimeoutMs = PasswordTimeoutSeconds * 1000;
+            var oldConfigData = LocalSecretStore.GetInstance(cmdlet: this).Configuration;
+            var newConfigData = new SecureStoreConfig(
+                scope: Scope,
+                passwordRequired: requirePassword,
+                passwordTimeout: passwordTimeoutMs,
+                doNotPrompt: DoNotPrompt);
+
+            var errorMsg = "";
+            if (!LocalSecretStore.GetInstance(cmdlet: this).UpdateConfiguration(
+                newConfigData,
+                ref errorMsg))
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSInvalidOperationException(errorMsg),
+                        errorId: "LocalStoreConfigurationUpdateFailed",
+                        errorCategory: ErrorCategory.InvalidOperation,
+                        this));
+            }
+
+            if (oldConfigData.PasswordRequired != newConfigData.PasswordRequired)
+            {
+                // TODO: Invoke UpdateLocalStorePasswordCommand
+                //  a. For passwordrequired == false, Set password to null and update
+                //  b. For passwordrequired == true, Prompt for new password (and verify), and update
+            }
+
+            WriteObject(newConfigData);
+        }
+
+        #endregion
+    }
 
     #endregion
 
