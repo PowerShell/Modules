@@ -1387,7 +1387,7 @@ namespace Microsoft.PowerShell.SecretManagement
         public SwitchParameter RequirePassword { get; set; } = true;
 
         [Parameter(Position=2)]
-        [ValidateRange(10, (Int32.MaxValue / 1000))]
+        [ValidateRange(-1, (Int32.MaxValue / 1000))]
         public int PasswordTimeoutSeconds { get; set; } = 90000;
 
         [Parameter(Position=3)]
@@ -1409,18 +1409,17 @@ namespace Microsoft.PowerShell.SecretManagement
                         this));
             }
 
-            bool requirePassword = (RequirePassword.IsPresent) ? (bool)RequirePassword : true;
-            int passwordTimeoutMs = PasswordTimeoutSeconds * 1000;
-            var oldConfigData = LocalSecretStore.GetInstance(cmdlet: this).Configuration;
+            int passwordTimeoutMs = (PasswordTimeoutSeconds > 0) ? PasswordTimeoutSeconds * 1000 : PasswordTimeoutSeconds;
             var newConfigData = new SecureStoreConfig(
                 scope: Scope,
-                passwordRequired: requirePassword,
+                passwordRequired: RequirePassword,
                 passwordTimeout: passwordTimeoutMs,
                 doNotPrompt: DoNotPrompt);
 
             var errorMsg = "";
             if (!LocalSecretStore.GetInstance(cmdlet: this).UpdateConfiguration(
-                newConfigData,
+                newConfigData: newConfigData,
+                cmdlet: this,
                 ref errorMsg))
             {
                 ThrowTerminatingError(
@@ -1429,13 +1428,6 @@ namespace Microsoft.PowerShell.SecretManagement
                         errorId: "LocalStoreConfigurationUpdateFailed",
                         errorCategory: ErrorCategory.InvalidOperation,
                         this));
-            }
-
-            if (oldConfigData.PasswordRequired != newConfigData.PasswordRequired)
-            {
-                // TODO: Invoke UpdateLocalStorePasswordCommand
-                //  a. For passwordrequired == false, Set password to null and update
-                //  b. For passwordrequired == true, Prompt for new password (and verify), and update
             }
 
             WriteObject(newConfigData);
@@ -1448,7 +1440,78 @@ namespace Microsoft.PowerShell.SecretManagement
 
     #region Reset-LocalStore
 
+    [Cmdlet(VerbsCommon.Reset, "LocalStore", SupportsShouldProcess = true, ConfirmImpact = ConfirmImpact.High)]
+    public sealed class ResetLocalStoreCommand : PSCmdlet
+    {
+        #region Parmeters
 
+        [Parameter(Position=0)]
+        public SecureStoreScope Scope { get; set; } = SecureStoreScope.Local;
+
+        [Parameter(Position=1)]
+        public SwitchParameter RequirePassword { get; set; } = true;
+
+        [Parameter(Position=2)]
+        [ValidateRange(-1, (Int32.MaxValue / 1000))]
+        public int PasswordTimeoutSeconds { get; set; } = 90000;
+
+        [Parameter(Position=3)]
+        public SwitchParameter DoNotPrompt { get; set; } = false;
+
+        [Parameter]
+        public SwitchParameter Force { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void BeginProcessing()
+        {
+            WriteWarning("This operation will completely remove all SecretManagement module local store secrets, and make any registered vault inoperable.");
+        }
+
+        protected override void EndProcessing()
+        {
+            if (Force || ShouldProcess(
+                target: "SecretManagement module local store",
+                action: "Erase all secrets in the local store and reset the configuration settings"))
+            {
+                int passwordTimeoutMs = (PasswordTimeoutSeconds > 0) ? PasswordTimeoutSeconds * 1000 : PasswordTimeoutSeconds;
+                var newConfig = new SecureStoreConfig(
+                    scope: Scope,
+                    passwordRequired: RequirePassword,
+                    passwordTimeout: passwordTimeoutMs,
+                    doNotPrompt: DoNotPrompt);
+
+                var errorMsg = "";
+                if (!SecureStoreFile.RemoveStoreFile(ref errorMsg))
+                {
+                    ThrowTerminatingError(
+                        new ErrorRecord(
+                            exception: new PSInvalidOperationException(errorMsg),
+                            errorId: "ResetLocalStoreCannotRemoveStoreFile",
+                            errorCategory: ErrorCategory.InvalidOperation,
+                            targetObject: this));
+                }
+
+                if (!SecureStoreFile.WriteConfigFile(
+                    configData: newConfig,
+                    ref errorMsg))
+                {
+                    ThrowTerminatingError(
+                        new ErrorRecord(
+                            exception: new PSInvalidOperationException(errorMsg),
+                            errorId: "ResetLocalStoreCannotWriteConfigFile",
+                            errorCategory: ErrorCategory.InvalidOperation,
+                            targetObject: this));
+                }
+
+                LocalSecretStore.Reset();
+            }
+        }
+
+        #endregion
+    }
 
 
     #endregion

@@ -757,14 +757,14 @@ namespace Microsoft.PowerShell.SecretManagement
     }
 
     // TODO:
-    //  b. Add auto update
-    //  c. Add support for SM local store configuration (password)
+
     //  d. Think about adding file back-up support
-    //  e. Add Disposed check (?)
     //  f. Add local store only tests
     //  g. Create AzKeyVault extension vault for demo
-    //  h. Add support for SM local store configuration (scope)
+    //  h. Add support for SM machine scope store configuration
     //  a. [DONE] Add support for SM local store password prompt
+    //  b. [DONE] Add auto update
+    //  c. [DONE] Add support for SM local store configuration (password)
     //  i. [DONE] Integrate into LocalStore
     //  j. [DONE] Test with current tests
 
@@ -851,7 +851,10 @@ namespace Microsoft.PowerShell.SecretManagement
         /// </summary>
         public void SetPassword(SecureString password)
         {
-            VerifyPasswordRequired();
+            if (password != null)
+            {
+                VerifyPasswordRequired();
+            }
 
             int passwordTimeout;
             lock (_syncObject)
@@ -882,9 +885,13 @@ namespace Microsoft.PowerShell.SecretManagement
         /// </summary>
         public void UpdatePassword(
             SecureString newpassword,
-            SecureString oldPassword)
+            SecureString oldPassword,
+            bool skipPasswordRequiredCheck)
         {
-            VerifyPasswordRequired();
+            if (!skipPasswordRequiredCheck)
+            {
+                VerifyPasswordRequired();
+            }
 
             lock (_syncObject)
             {
@@ -1100,18 +1107,19 @@ namespace Microsoft.PowerShell.SecretManagement
         }
 
         public bool UpdateConfigData(
-            SecureStoreConfig configData,
+            SecureStoreConfig newConfigData,
+            PSCmdlet cmdlet,
             ref string errorMsg)
         {
+            // First update the configuration information.
             SecureStoreConfig oldConfigData;
             lock (_syncObject)
             {
                 oldConfigData = _configData;
-                _configData = configData;
+                _configData = newConfigData;
             }
-
             if (!SecureStoreFile.WriteConfigFile(
-                configData,
+                newConfigData,
                 ref errorMsg))
             {
                 lock(_syncObject)
@@ -1121,6 +1129,78 @@ namespace Microsoft.PowerShell.SecretManagement
 
                 return false;
             }
+
+            // If password requirement changed, then change password encryption as needed.
+            if (oldConfigData.PasswordRequired != newConfigData.PasswordRequired)
+            {
+                bool success;
+                try
+                {
+                    SecureString oldPassword;
+                    SecureString newPassword;
+                    if (newConfigData.PasswordRequired)
+                    {
+                        // Prompt for new password
+                        oldPassword = null;
+                        newPassword = Utils.PromptForPassword(
+                            cmdlet: cmdlet,
+                            verifyPassword: true,
+                            message: "A password is now required for the local store configuration.\nTo complete the change please provide new password.");
+                        
+                        if (newPassword == null)
+                        {
+                            throw new PSInvalidOperationException("New password was not provided.");
+                        }
+                    }
+                    else
+                    {
+                        // Prompt for old password
+                        newPassword = null;
+                        oldPassword = Utils.PromptForPassword(
+                            cmdlet: cmdlet,
+                            verifyPassword: false,
+                            message: "A password is no longer required for the local store configuration.\nTo complete the change please provide the current password.");
+
+                        if (oldPassword == null)
+                        {
+                            throw new PSInvalidOperationException("Old password was not provided.");
+                        }
+                    }
+
+                    UpdatePassword(
+                        newPassword,
+                        oldPassword,
+                        skipPasswordRequiredCheck: true);
+
+                    success = true;
+                }
+                catch (Exception ex)
+                {
+                    errorMsg = string.Format(CultureInfo.InvariantCulture,
+                        @"Unable to update local store data from configuration change with error: {0}",
+                        ex.Message);
+                    success = false;
+                }
+
+                if (!success)
+                {
+                    // Attempt to revert back to original configuration.
+                    lock(_syncObject)
+                    {
+                        _configData = oldConfigData;
+                    }
+
+                    SecureStoreFile.WriteConfigFile(
+                        oldConfigData,
+                        ref errorMsg);
+
+                    return false;
+                }
+            }
+
+            // Write out actions taken for user
+            //  a. Password timeout and DoNotPrompt will be in effect after new session start.
+            //  b. If password required change, then secrets will be re-encrypted per above.
 
             return true;
         }
@@ -1322,7 +1402,8 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Static methods
 
-        public static SecureStore GetDefault()
+        public static SecureStore GetDefault(
+            SecureStoreConfig configData)
         {
             var data = new SecureStoreData()
             {
@@ -1333,7 +1414,7 @@ namespace Microsoft.PowerShell.SecretManagement
 
             return new SecureStore(
                 data: data,
-                configData: SecureStoreConfig.GetDefault());
+                configData: configData);
         }
 
         public static SecureStore GetStore(
@@ -1395,7 +1476,7 @@ namespace Microsoft.PowerShell.SecretManagement
             // If no file, create a default store
             if (errorMsg.Equals("NoFile", StringComparison.OrdinalIgnoreCase))
             {
-                var secureStore = GetDefault();
+                var secureStore = GetDefault(configData);
                 if (!SecureStoreFile.WriteFile(
                     password: password,
                     data: secureStore.Data,
@@ -1474,6 +1555,24 @@ namespace Microsoft.PowerShell.SecretManagement
                 {
                     return _lastWriteTime;
                 }
+            }
+        }
+
+        public static bool ConfigAllowsPrompting
+        {
+            get
+            {
+                // Try to read the local store configuration file.
+                string errorMsg = "";
+                if (ReadConfigFile(
+                    configData: out SecureStoreConfig configData,
+                    ref errorMsg))
+                {
+                    return !configData.DoNotPrompt;
+                }
+
+                // Default behavior is to allow password prompting.
+                return true;
             }
         }
 
@@ -1736,6 +1835,41 @@ namespace Microsoft.PowerShell.SecretManagement
             return false;
         }
 
+        public static bool RemoveStoreFile(ref string errorMsg)
+        {
+            var count = 0;
+            Exception exFail = null;
+            do
+            {
+                try
+                {
+                    File.Delete(LocalStoreFilePath);
+                    return true;
+                }
+                catch (IOException exIO)
+                {
+                    // Make up to four attempts.
+                    exFail = exIO;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error.
+                    exFail = ex;
+                    break;
+                }
+
+                System.Threading.Thread.Sleep(250);
+
+            } while (++count < 4);
+
+            errorMsg = string.Format(
+                CultureInfo.InvariantCulture,
+                @"Unable to remove the local store file with error: {0}",
+                exFail.Message);
+
+            return false;
+        }
+
         public static bool StoreFileExists()
         {
             return File.Exists(LocalStoreFilePath);
@@ -1845,13 +1979,14 @@ namespace Microsoft.PowerShell.SecretManagement
             SecureString password = null,
             PSCmdlet cmdlet = null)
         {
-
             if (LocalStore == null)
             {
                 lock (SyncObject)
                 {
                     if (LocalStore == null)
                     {
+                        bool storeFileExists = SecureStoreFile.StoreFileExists();
+
                         try
                         {
                             LocalStore = new LocalSecretStore(
@@ -1859,18 +1994,44 @@ namespace Microsoft.PowerShell.SecretManagement
                         }
                         catch (SecureStorePasswordException)
                         {
-                            if (cmdlet != null)
+                            if ((cmdlet != null) && SecureStoreFile.ConfigAllowsPrompting)
                             {
-                                password = Utils.PromptForPassword(cmdlet);
+                                if (SecureStoreFile.StoreFileExists())
+                                {
+                                    // Prompt for existing local store file.
+                                    password = Utils.PromptForPassword(cmdlet);
+                                }
+                                else
+                                {
+                                    // Prompt for creation of new store file.
+                                    password = Utils.PromptForPassword(
+                                        cmdlet: cmdlet,
+                                        verifyPassword: true,
+                                        message: "Creating new store file. A password is required by the current store configuration.");
+                                }
+
                                 LocalStore = new LocalSecretStore(
                                     SecureStore.GetStore(password));
+
+                                return LocalStore;
                             }
+
+                            // Cannot access store without password.
+                            throw;
                         }
                     }
                 }
             }
 
             return LocalStore;
+        }
+
+        public static void Reset()
+        {
+            lock (SyncObject)
+            {
+                LocalStore = null;
+            }
         }
 
         #endregion
@@ -2087,6 +2248,7 @@ namespace Microsoft.PowerShell.SecretManagement
         public void UnlockLocalStore(SecureString password)
         {
             _secureStore.SetPassword(password);
+            
             try
             {
                 _secureStore.UpdateFromFile();
@@ -2103,15 +2265,18 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             _secureStore.UpdatePassword(
                 newPassword,
-                oldPassword);
+                oldPassword,
+                skipPasswordRequiredCheck: false);
         }
 
         public bool UpdateConfiguration(
             SecureStoreConfig newConfigData,
+            PSCmdlet cmdlet,
             ref string errorMsg)
         {
             return _secureStore.UpdateConfigData(
                 newConfigData,
+                cmdlet,
                 ref errorMsg);
         }
 
