@@ -24,13 +24,8 @@ namespace Microsoft.PowerShell.SecretManagement
     {
         #region Members
 
-#if UNIX
-        private static readonly string LocalLocation = Environment.GetEnvironmentVariable("HOME");
-#else
-        private static readonly string LocalLocation = Environment.GetEnvironmentVariable("USERPROFILE");
-#endif
-        private static readonly string SMLocalPath = Path.Combine(LocalLocation, ".secretmanagement");
-
+        private static readonly string LocalLocation;
+        private static readonly string SMLocalPath;
         private const string ConvertJsonToHashtableScript = @"
             param (
                 [string] $json
@@ -71,6 +66,27 @@ namespace Microsoft.PowerShell.SecretManagement
             $customObject = ConvertFrom-Json -InputObject $json -Depth 5
             return ConvertToHash $customObject
         ";
+
+        #endregion
+
+        #region Constructor
+
+        static Utils()
+        {
+            var isWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Windows);
+
+            if (isWindows)
+            {
+                LocalLocation = Environment.GetEnvironmentVariable("USERPROFILE");
+            }
+            else
+            {
+                LocalLocation = Environment.GetEnvironmentVariable("HOME");
+            }
+
+            SMLocalPath = Path.Combine(LocalLocation, ".secretmanagement");
+        }
 
         #endregion
 
@@ -856,14 +872,25 @@ namespace Microsoft.PowerShell.SecretManagement
                 VerifyPasswordRequired();
             }
 
-            int passwordTimeout;
             lock (_syncObject)
             {
                 _password = password;
-                passwordTimeout = _configData.PasswordTimeout;
+                if (password != null)
+                {
+                    SetPasswordTimer(_configData.PasswordTimeout);
+                }
+            }
+        }
+
+        private void SetPasswordTimer(int timeoutMSec)
+        {
+            if (_passwordTimer != null)
+            {
+                _passwordTimer.Dispose();
+                _passwordTimer = null;
             }
 
-            if (passwordTimeout > 0)
+            if (timeoutMSec > 0)
             {
                 _passwordTimer = new Timer(
                     callback: (_) => 
@@ -874,7 +901,7 @@ namespace Microsoft.PowerShell.SecretManagement
                             }
                         },
                     state: null,
-                    dueTime: passwordTimeout,
+                    dueTime: timeoutMSec,
                     period: Timeout.Infinite);
             }
         }
@@ -1197,10 +1224,10 @@ namespace Microsoft.PowerShell.SecretManagement
                     return false;
                 }
             }
-
-            // Write out actions taken for user
-            //  a. Password timeout and DoNotPrompt will be in effect after new session start.
-            //  b. If password required change, then secrets will be re-encrypted per above.
+            else if ((oldConfigData.PasswordTimeout != newConfigData.PasswordTimeout) && (_password != null))
+            {
+                SetPasswordTimer(newConfigData.PasswordTimeout);
+            }
 
             return true;
         }
@@ -1912,7 +1939,7 @@ namespace Microsoft.PowerShell.SecretManagement
     /// <summary>
     /// Default local secret store
     /// </summary>
-    internal sealed class LocalSecretStore
+    internal sealed class LocalSecretStore : IDisposable
     {
         #region Members
 
@@ -1973,6 +2000,18 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #endregion
     
+        #region IDisposable
+
+        public void Dispose()
+        {
+            if (_secureStore != null)
+            {
+                _secureStore.Dispose();
+            }
+        }
+
+        #endregion
+
         #region Public static
 
         public static LocalSecretStore GetInstance(
@@ -2030,6 +2069,7 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             lock (SyncObject)
             {
+                LocalStore.Dispose();
                 LocalStore = null;
             }
         }
@@ -2041,12 +2081,32 @@ namespace Microsoft.PowerShell.SecretManagement
         public bool WriteObject<T>(
             string name,
             T objectToWrite,
+            PSCmdlet cmdlet,
             ref string errorMsg)
         {
-            return WriteObjectImpl(
-                PrependTag(name),
-                objectToWrite,
-                ref errorMsg);
+            var count = 0;
+            do
+            {
+                try
+                {
+                    return WriteObjectImpl(
+                        PrependTag(name),
+                        objectToWrite,
+                        ref errorMsg);
+                }
+                catch (SecureStorePasswordException)
+                {
+                    if (_secureStore.ConfigData.DoNotPrompt || cmdlet == null)
+                    {
+                        throw;
+                    }
+
+                    _secureStore.SetPassword(
+                        Utils.PromptForPassword(cmdlet: cmdlet));
+                }
+            } while (count++ < 1);
+
+            return false;
         }
 
         private bool WriteObjectImpl<T>(
@@ -2095,12 +2155,33 @@ namespace Microsoft.PowerShell.SecretManagement
         public bool ReadObject(
             string name,
             out object outObject,
+            PSCmdlet cmdlet,
             ref string errorMsg)
         {
-            return ReadObjectImpl(
-                PrependTag(name),
-                out outObject,
-                ref errorMsg);
+            var count = 0;
+            do
+            {
+                try
+                {
+                    return ReadObjectImpl(
+                        PrependTag(name),
+                        out outObject,
+                        ref errorMsg);
+                }
+                catch (SecureStorePasswordException)
+                {
+                    if (_secureStore.ConfigData.DoNotPrompt || cmdlet == null)
+                    {
+                        throw;
+                    }
+
+                    _secureStore.SetPassword(
+                        Utils.PromptForPassword(cmdlet: cmdlet));
+                }
+            } while (count++ < 1);
+
+            outObject = null;
+            return false;
         }
 
         private bool ReadObjectImpl(
@@ -2154,12 +2235,37 @@ namespace Microsoft.PowerShell.SecretManagement
         public bool EnumerateObjectInfo(
             string filter,
             out SecretInformation[] outSecretInfo,
+            PSCmdlet cmdlet,
             ref string errorMsg)
         {
-            if (!EnumerateBlobs(
-                PrependTag(filter),
-                out EnumeratedBlob[] outBlobs,
-                ref errorMsg))
+            var count = 0;
+            EnumeratedBlob[] outBlobs = null;
+            do
+            {
+                try
+                {
+                    if (!EnumerateBlobs(
+                        PrependTag(filter),
+                        out outBlobs,
+                        ref errorMsg))
+                    {
+                        outSecretInfo = null;
+                        return false;
+                    }
+                }
+                catch (SecureStorePasswordException)
+                {
+                    if (_secureStore.ConfigData.DoNotPrompt || cmdlet == null)
+                    {
+                        throw;
+                    }
+
+                    _secureStore.SetPassword(
+                        Utils.PromptForPassword(cmdlet: cmdlet));
+                }
+            } while (count++ < 1);
+
+            if (outBlobs == null)
             {
                 outSecretInfo = null;
                 return false;
@@ -2218,13 +2324,37 @@ namespace Microsoft.PowerShell.SecretManagement
 
         public bool DeleteObject(
             string name,
+            PSCmdlet cmdlet,
             ref string errorMsg)
         {
-            // Hash tables are complex and require special processing.
-            if (!ReadObject(
-                name,
-                out object outObject,
-                ref errorMsg))
+            var count = 0;
+            object outObject = null;
+            do
+            {
+                try
+                {
+                    if (!ReadObject(
+                        name: name,
+                        outObject: out outObject,
+                        cmdlet: null,
+                        ref errorMsg))
+                    {
+                        return false;
+                    }
+                }
+                catch (SecureStorePasswordException)
+                {
+                    if (_secureStore.ConfigData.DoNotPrompt || cmdlet == null)
+                    {
+                        throw;
+                    }
+
+                    _secureStore.SetPassword(
+                        Utils.PromptForPassword(cmdlet: cmdlet));
+                }
+            } while (count++ < 1);
+
+            if (outObject == null)
             {
                 return false;
             }
@@ -3737,6 +3867,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 if (LocalSecretStore.GetInstance().ReadObject(
                     name: VaultParametersName,
                     outObject: out object outObject,
+                    cmdlet: null,
                     ref errorMsg))
                 {
                     if (outObject is Hashtable hashtable)
@@ -3755,8 +3886,9 @@ namespace Microsoft.PowerShell.SecretManagement
             {
                 string errorMsg = "";
                 if (LocalSecretStore.GetInstance().ReadObject(
-                    paramsName,
-                    out object outObject,
+                    name: paramsName,
+                    outObject: out object outObject,
+                    cmdlet: null,
                     ref errorMsg))
                 {
                     var hashtable = outObject as Hashtable;

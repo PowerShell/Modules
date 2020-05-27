@@ -403,7 +403,8 @@ namespace Microsoft.PowerShell.SecretManagement
                 string errorMsg = "";
                 if (!LocalSecretStore.GetInstance(cmdlet: this).WriteObject(
                     name: parametersName,
-                    parameters,
+                    objectToWrite: parameters,
+                    cmdlet: this,
                     ref errorMsg))
                 {
                     var msg = string.Format(
@@ -541,7 +542,10 @@ namespace Microsoft.PowerShell.SecretManagement
                 if (!string.IsNullOrEmpty(parametersName))
                 {
                     string errorMsg = "";
-                    if (!LocalSecretStore.GetInstance(cmdlet: this).DeleteObject(parametersName, ref errorMsg))
+                    if (!LocalSecretStore.GetInstance(cmdlet: this).DeleteObject(
+                        name: parametersName,
+                        cmdlet: this,
+                        ref errorMsg))
                     {
                         var msg = string.Format(CultureInfo.InvariantCulture, 
                             "Removal of vault info script parameters {0} failed with error {1}", parametersName, errorMsg);
@@ -766,6 +770,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (LocalSecretStore.GetInstance(cmdlet: this).EnumerateObjectInfo(
                 filter: Name,
                 outSecretInfo: out SecretInformation[] outSecretInfo,
+                cmdlet: this,
                 errorMsg: ref errorMsg))
             {
                 WriteResults(
@@ -941,6 +946,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (LocalSecretStore.GetInstance(cmdlet: this).ReadObject(
                 name: name,
                 outObject: out object outObject,
+                cmdlet: this,
                 ref errorMsg))
             {
                 WriteSecret(outObject);
@@ -1069,7 +1075,8 @@ namespace Microsoft.PowerShell.SecretManagement
             {
                 if (LocalSecretStore.GetInstance(cmdlet: this).ReadObject(
                     name: Name,
-                    out object _,
+                    outObject: out object _,
+                    cmdlet: this,
                     ref errorMsg))
                 {
                     ThrowTerminatingError(
@@ -1085,6 +1092,7 @@ namespace Microsoft.PowerShell.SecretManagement
             if (!LocalSecretStore.GetInstance(cmdlet: this).WriteObject(
                 name: Name,
                 objectToWrite: secretToWrite,
+                cmdlet: this,
                 ref errorMsg))
             {
                 var msg = string.Format(CultureInfo.InvariantCulture, 
@@ -1147,6 +1155,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 string errorMsg = "";
                 if (!LocalSecretStore.GetInstance(cmdlet: this).DeleteObject(
                     name: Name,
+                    cmdlet: this,
                     errorMsg: ref errorMsg))
                 {
                     var msg = string.Format(CultureInfo.InvariantCulture, 
@@ -1388,7 +1397,7 @@ namespace Microsoft.PowerShell.SecretManagement
 
         [Parameter(Position=2)]
         [ValidateRange(-1, (Int32.MaxValue / 1000))]
-        public int PasswordTimeoutSeconds { get; set; } = 90000;
+        public int PasswordTimeoutSeconds { get; set; } = 900;
 
         [Parameter(Position=3)]
         public SwitchParameter DoNotPrompt { get; set; } = false;

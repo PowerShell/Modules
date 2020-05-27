@@ -10,6 +10,10 @@ Describe "Test Microsoft.PowerShell.SecretManagement module" -tags CI {
             Import-Module -Name Microsoft.PowerShell.SecretManagement
         }
 
+        # Reset the local store and configure it for no-password access
+        # TODO: This deletes all local store data!!
+        Reset-LocalStore -Scope Local -RequirePassword:$false -PasswordTimeoutSeconds -1 -DoNotPrompt -Force
+
         # Binary extension module
         $classImplementation = @'
             using Microsoft.PowerShell.SecretManagement;
