@@ -1049,7 +1049,7 @@ namespace Microsoft.PowerShell.SecretManagement
                     if (result != null)
                     {
                         var msg = string.Format(CultureInfo.InvariantCulture, 
-                            "A secret with name {0} already exists in vault {1}", Name, Vault);
+                            "A secret with name {0} already exists in vault {1}.", Name, Vault);
                         ThrowTerminatingError(
                             new ErrorRecord(
                                 new PSInvalidOperationException(msg),
@@ -1079,9 +1079,11 @@ namespace Microsoft.PowerShell.SecretManagement
                     cmdlet: this,
                     ref errorMsg))
                 {
+                    var msg = string.Format(CultureInfo.InvariantCulture, 
+                        "A secret with name {0} already exists.", Name);
                     ThrowTerminatingError(
                         new ErrorRecord(
-                            new PSInvalidOperationException(errorMsg),
+                            new PSInvalidOperationException(msg),
                             "AddSecretAlreadyExists",
                             ErrorCategory.ResourceExists,
                             this));

@@ -246,9 +246,15 @@ namespace Microsoft.PowerShell.SecretManagement
             bool verifyPassword = false,
             string message = null)
         {
+            if (cmdlet.Host == null || cmdlet.Host.UI == null)
+            {
+                throw new PSInvalidOperationException(
+                    "Cannot prompt for password. No host available.");
+            }
+
             SecureString password = null;
 
-            cmdlet.WriteObject(
+            cmdlet.Host.UI.WriteLine(
                 string.IsNullOrEmpty(message) ? 
                     "A password is required for Secret Management module local store"
                     : message);
@@ -257,20 +263,20 @@ namespace Microsoft.PowerShell.SecretManagement
             do
             {
                 // Initial prompt
-                cmdlet.WriteObject("Enter password:");
+                cmdlet.Host.UI.WriteLine("Enter password:");
                 password = cmdlet.Host.UI.ReadLineAsSecureString();
 
                 if (verifyPassword)
                 {
                     // Verification prompt
-                    cmdlet.WriteObject("Enter password again for verification:");
+                    cmdlet.Host.UI.WriteLine("Enter password again for verification:");
                     var passwordVerified = cmdlet.Host.UI.ReadLineAsSecureString();
 
                     isVerified = ComparePasswords(password, passwordVerified);
 
                     if (!isVerified)
                     {
-                        cmdlet.WriteObject("\nThe two entered passwords do not match.  Please re-enter the passwords.\n");
+                        cmdlet.Host.UI.WriteLine("\nThe two entered passwords do not match.  Please re-enter the passwords.\n");
                     }
                 }
             } while (!isVerified);
@@ -690,6 +696,20 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #endregion
 
+        #region Static methods
+
+        public static SecureStoreData CreateEmpty()
+        {
+            return new SecureStoreData()
+            {
+                Key = CryptoUtils.GenerateKey(),
+                Blob = new byte[0],
+                MetaData = new Dictionary<string, SecureStoreMetadata>(StringComparer.InvariantCultureIgnoreCase)
+            };
+        }
+
+        #endregion
+
         #region Private methods
 
         // Example meta data json
@@ -772,18 +792,6 @@ namespace Microsoft.PowerShell.SecretManagement
         #endregion
     }
 
-    // TODO:
-
-    //  d. Think about adding file back-up support
-    //  f. Add local store only tests
-    //  g. Create AzKeyVault extension vault for demo
-    //  h. Add support for SM machine scope store configuration
-    //  a. [DONE] Add support for SM local store password prompt
-    //  b. [DONE] Add auto update
-    //  c. [DONE] Add support for SM local store configuration (password)
-    //  i. [DONE] Integrate into LocalStore
-    //  j. [DONE] Test with current tests
-
     internal sealed class SecureStore : IDisposable
     {
         #region Members
@@ -793,7 +801,7 @@ namespace Microsoft.PowerShell.SecretManagement
         private SecureStoreConfig _configData;
         private Timer _passwordTimer;
         private readonly object _syncObject = new object();
-        private static TimeSpan _updateDelay = TimeSpan.FromSeconds(15);
+        private static TimeSpan _updateDelay = TimeSpan.FromSeconds(5);
 
         #endregion
 
@@ -844,7 +852,21 @@ namespace Microsoft.PowerShell.SecretManagement
             _configData = configData;
             SetPassword(password);
 
-            SecureStoreFile.FileUpdated += (sender, args) => HandleFileUpdateEvent(sender, args);
+            SecureStoreFile.DataUpdated += (sender, args) => HandleDataUpdateEvent(sender, args);
+            SecureStoreFile.ConfigUpdated += (sender, args) => HandleConfigUpdateEvent(sender, args);
+        }
+
+        #endregion
+
+        #region Events
+
+        public event EventHandler<EventArgs> StoreConfigUpdated;
+        private void RaiseStoreConfigUpdatedEvent()
+        {
+            if (StoreConfigUpdated != null)
+            {
+                StoreConfigUpdated.Invoke(this, null);
+            }
         }
 
         #endregion
@@ -962,6 +984,12 @@ namespace Microsoft.PowerShell.SecretManagement
 
                 _data = newData;
                 SetPassword(newpassword);
+
+                // Password change is considered a configuration change.
+                // Induce a configuration change event by writing to the config file.
+                SecureStoreFile.WriteConfigFile(
+                    configData: _configData,
+                    ref errorMsg);
             }
         }
 
@@ -1232,15 +1260,16 @@ namespace Microsoft.PowerShell.SecretManagement
             return true;
         }
 
-        public void UpdateFromFile()
+        public void UpdateDataFromFile()
         {
             var errorMsg = "";
+            SecureStoreData data;
             if (!SecureStoreFile.ReadFile(
                 password: Password,
-                data: out SecureStoreData data,
+                data: out data,
                 ref errorMsg))
             {
-                throw new PSInvalidOperationException(errorMsg);
+                data = SecureStoreData.CreateEmpty();
             }
             
             lock (_syncObject)
@@ -1253,17 +1282,48 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Private methods
 
-        private void HandleFileUpdateEvent(object sender, FileUpdateEventArgs args)
+        private void UpdateConfigFromFile()
         {
-            // This is a 'best effort' intent to keep the current session data in sync 
-            // with external changes.
-            // Only update if the reported change is after the latest write from this session.
+            var errorMsg = "";
+            if (!SecureStoreFile.ReadConfigFile(
+                configData: out SecureStoreConfig configData,
+                ref errorMsg))
+            {
+                throw new PSInvalidOperationException(errorMsg);
+            }
+
+            lock (_syncObject)
+            {
+                _configData = configData;
+            }
+
+            // Refresh secret data
+            UpdateDataFromFile();
+        }
+
+        private void HandleConfigUpdateEvent(object sender, FileUpdateEventArgs args)
+        {
             try
             {
-                var fileChangeTime = System.IO.File.GetLastWriteTime(args.FileChangedArgs.FullPath);
-                if ((fileChangeTime - SecureStoreFile.LastWriteTime) > _updateDelay)
+                if ((args.FileChangedTime - SecureStoreFile.LastWriteTime) > _updateDelay)
                 {
-                    UpdateFromFile();
+                    UpdateConfigFromFile();
+                }
+
+                RaiseStoreConfigUpdatedEvent();
+            }
+            catch
+            {
+            }
+        }
+
+        private void HandleDataUpdateEvent(object sender, FileUpdateEventArgs args)
+        {
+            try
+            {
+                if ((args.FileChangedTime - SecureStoreFile.LastWriteTime) > _updateDelay)
+                {
+                    UpdateDataFromFile();
                 }
             }
             catch
@@ -1429,15 +1489,10 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Static methods
 
-        public static SecureStore GetDefault(
+        private static SecureStore GetDefault(
             SecureStoreConfig configData)
         {
-            var data = new SecureStoreData()
-            {
-                Key = CryptoUtils.GenerateKey(),
-                Blob = new byte[0],
-                MetaData = new Dictionary<string, SecureStoreMetadata>(StringComparer.InvariantCultureIgnoreCase)
-            };
+            var data = SecureStoreData.CreateEmpty();
 
             return new SecureStore(
                 data: data,
@@ -1528,13 +1583,18 @@ namespace Microsoft.PowerShell.SecretManagement
     {
         #region Members
 
+        private const string StoreFileName = "storefile";
+        private const string StoreConfigName = "storeconfig";
+
         private static readonly string LocalStorePath = Path.Combine(Utils.SecretManagementLocalPath, ".localstore");
-        private static readonly string LocalStoreFilePath = Path.Combine(LocalStorePath, "storefile");
-        private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, "storeconfig");
+        private static readonly string LocalStoreFilePath = Path.Combine(LocalStorePath, StoreFileName);
+        private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, StoreConfigName);
 
         private static readonly FileSystemWatcher _storeFileWatcher;
+        private static readonly Timer _updateEventTimer;
+        private static readonly object _syncObject;
         private static DateTime _lastWriteTime;
-        private static object _syncObject;
+        private static DateTime _lastFileChange;
 
         #endregion
 
@@ -1549,24 +1609,50 @@ namespace Microsoft.PowerShell.SecretManagement
 
             _storeFileWatcher = new FileSystemWatcher(LocalStorePath);
             _storeFileWatcher.NotifyFilter = NotifyFilters.LastWrite;
-            _storeFileWatcher.Filter = "storefile";
+            _storeFileWatcher.Filter = "store*";    // storefile, storeconfig
             _storeFileWatcher.EnableRaisingEvents = true;
             _storeFileWatcher.Changed += (sender, args) => { UpdateData(args); };
 
             _syncObject = new object();
             _lastWriteTime = DateTime.MinValue;
+            _updateEventTimer = new Timer(
+                (state) => {
+                    try
+                    {
+                        DateTime fileChangeTime;
+                        lock (_syncObject)
+                        {
+                            fileChangeTime = _lastFileChange;
+                        }
+
+                        RaiseDataUpdatedEvent(
+                            new FileUpdateEventArgs(fileChangeTime));
+                    }
+                    catch
+                    {
+                    }
+                });
         }
 
         #endregion
 
         #region Events
 
-        public static event EventHandler<FileUpdateEventArgs> FileUpdated;
-        private static void RaiseFileUpdatedEvent(FileUpdateEventArgs args)
+        public static event EventHandler<FileUpdateEventArgs> DataUpdated;
+        private static void RaiseDataUpdatedEvent(FileUpdateEventArgs args)
         {
-            if (FileUpdated != null)
+            if (DataUpdated != null)
             {
-                FileUpdated.Invoke(null, args);
+                DataUpdated.Invoke(null, args);
+            }
+        }
+
+        public static event EventHandler<FileUpdateEventArgs> ConfigUpdated;
+        private static void RaiseConfigUpdatedEvent(FileUpdateEventArgs args)
+        {
+            if (ConfigUpdated != null)
+            {
+                ConfigUpdated.Invoke(null, args);
             }
         }
 
@@ -1908,7 +1994,32 @@ namespace Microsoft.PowerShell.SecretManagement
 
         private static void UpdateData(FileSystemEventArgs args)
         {
-            RaiseFileUpdatedEvent(new FileUpdateEventArgs(args));
+
+            try
+            {
+                var lastFileChange = System.IO.File.GetLastWriteTime(args.FullPath);
+                var fileName = System.IO.Path.GetFileNameWithoutExtension(args.FullPath);
+                if (fileName.Equals(StoreFileName))
+                {
+                    lock (_syncObject)
+                    {
+                        // Set/reset event callback timer for each file change event.
+                        // This is to smooth out multiple file changes into a single update event.
+                        _lastFileChange = lastFileChange;
+                        _updateEventTimer.Change(
+                            dueTime: 5000,              // 5 second delay
+                            period: Timeout.Infinite);
+                    }
+                }
+                else if (fileName.Equals(StoreConfigName))
+                {
+                    RaiseConfigUpdatedEvent(
+                        new FileUpdateEventArgs(lastFileChange));
+                }
+            }
+            catch
+            {
+            }
         }
 
         #endregion
@@ -1918,15 +2029,15 @@ namespace Microsoft.PowerShell.SecretManagement
 
     internal sealed class FileUpdateEventArgs : EventArgs
     {
-        public FileSystemEventArgs FileChangedArgs
+        public DateTime FileChangedTime
         {
-            private set;
             get;
+            private set;
         }
 
-        public FileUpdateEventArgs(FileSystemEventArgs args)
+        public FileUpdateEventArgs(DateTime fileChangedTime)
         {
-            FileChangedArgs = args;
+            FileChangedTime = fileChangedTime;
         }
     }
 
@@ -1986,6 +2097,10 @@ namespace Microsoft.PowerShell.SecretManagement
             SecureStore secureStore)
         {
             _secureStore = secureStore;
+            _secureStore.StoreConfigUpdated += (sender, args) => {
+                // If the local store configuration changed, then reload the store from file.
+                LocalSecretStore.Reset();
+            };
         }
 
         static LocalSecretStore()
@@ -2069,7 +2184,7 @@ namespace Microsoft.PowerShell.SecretManagement
         {
             lock (SyncObject)
             {
-                LocalStore.Dispose();
+                LocalStore?.Dispose();
                 LocalStore = null;
             }
         }
@@ -2381,7 +2496,7 @@ namespace Microsoft.PowerShell.SecretManagement
             
             try
             {
-                _secureStore.UpdateFromFile();
+                _secureStore.UpdateDataFromFile();
             }
             catch (SecureStorePasswordException)
             {
