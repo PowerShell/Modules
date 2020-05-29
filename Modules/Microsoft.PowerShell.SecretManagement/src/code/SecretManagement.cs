@@ -1248,8 +1248,7 @@ namespace Microsoft.PowerShell.SecretManagement
     /// Password will remain in effect for the session until the timeout expires.
     /// The password timeout is set in the local store configuration.
     /// </summary>
-    [Cmdlet(VerbsCommon.Unlock, "LocalStore",
-        DefaultParameterSetName = SecureStringParameterSet)]
+    [Cmdlet(VerbsCommon.Unlock, "LocalStore", DefaultParameterSetName = SecureStringParameterSet)]
     public sealed class UnlockLocalStoreCommand : PSCmdlet
     {
         #region Members
