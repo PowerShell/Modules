@@ -437,7 +437,7 @@ namespace Microsoft.PowerShell.SecretManagement
             private set;
         }
 
-        public int PasswordTimeout
+        public int PasswordTimeoutSecs
         {
             get;
             private set;
@@ -460,12 +460,12 @@ namespace Microsoft.PowerShell.SecretManagement
         public SecureStoreConfig(
             SecureStoreScope scope,
             bool passwordRequired,
-            int passwordTimeout,
+            int passwordTimeoutSecs,
             bool doNotPrompt)
         {
             Scope = scope;
             PasswordRequired = passwordRequired;
-            PasswordTimeout = passwordTimeout;
+            PasswordTimeoutSecs = passwordTimeoutSecs;
             DoNotPrompt = doNotPrompt;
         }
 
@@ -490,8 +490,8 @@ namespace Microsoft.PowerShell.SecretManagement
                 key: "PasswordRequired",
                 value: PasswordRequired);
             configHashtable.Add(
-                key: "PasswordTimeout",
-                value: PasswordTimeout);
+                key: "PasswordTimeoutSecs",
+                value: PasswordTimeoutSecs);
             configHashtable.Add(
                 key: "DoNotPrompt",
                 value: DoNotPrompt);
@@ -513,7 +513,7 @@ namespace Microsoft.PowerShell.SecretManagement
             dynamic configDataObj = (Utils.ConvertJsonToPSObject(json));
             Scope = (SecureStoreScope) configDataObj.ConfigData.StoreScope;
             PasswordRequired = (bool) configDataObj.ConfigData.PasswordRequired;
-            PasswordTimeout = (int) configDataObj.ConfigData.PasswordTimeout;
+            PasswordTimeoutSecs = (int) configDataObj.ConfigData.PasswordTimeoutSecs;
             DoNotPrompt = (bool) configDataObj.ConfigData.DoNotPrompt;
         }
 
@@ -526,7 +526,7 @@ namespace Microsoft.PowerShell.SecretManagement
             return new SecureStoreConfig(
                 scope: SecureStoreScope.Local,
                 passwordRequired: true,
-                passwordTimeout: 900000,    // 15 minute timeout
+                passwordTimeoutSecs: 900,    // 15 minute timeout
                 doNotPrompt: false);
         }
 
@@ -629,7 +629,7 @@ namespace Microsoft.PowerShell.SecretManagement
             @{
                 StoreScope='LocalScope'
                 PasswordRequired=$true
-                PasswordTimeout=-1,
+                PasswordTimeoutSecs=-1,
                 DoNotPrompt=$false
             }
             MetaData =
@@ -899,12 +899,12 @@ namespace Microsoft.PowerShell.SecretManagement
                 _password = password;
                 if (password != null)
                 {
-                    SetPasswordTimer(_configData.PasswordTimeout);
+                    SetPasswordTimer(_configData.PasswordTimeoutSecs);
                 }
             }
         }
 
-        private void SetPasswordTimer(int timeoutMSec)
+        private void SetPasswordTimer(int timeoutSecs)
         {
             if (_passwordTimer != null)
             {
@@ -912,7 +912,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 _passwordTimer = null;
             }
 
-            if (timeoutMSec > 0)
+            if (timeoutSecs > 0)
             {
                 _passwordTimer = new Timer(
                     callback: (_) => 
@@ -923,7 +923,7 @@ namespace Microsoft.PowerShell.SecretManagement
                             }
                         },
                     state: null,
-                    dueTime: timeoutMSec,
+                    dueTime: timeoutSecs * 1000,
                     period: Timeout.Infinite);
             }
         }
@@ -1252,9 +1252,9 @@ namespace Microsoft.PowerShell.SecretManagement
                     return false;
                 }
             }
-            else if ((oldConfigData.PasswordTimeout != newConfigData.PasswordTimeout) && (_password != null))
+            else if ((oldConfigData.PasswordTimeoutSecs != newConfigData.PasswordTimeoutSecs) && (_password != null))
             {
-                SetPasswordTimer(newConfigData.PasswordTimeout);
+                SetPasswordTimer(newConfigData.PasswordTimeoutSecs);
             }
 
             return true;
@@ -2080,7 +2080,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 return new SecureStoreConfig(
                     scope: _secureStore.ConfigData.Scope,
                     passwordRequired: _secureStore.ConfigData.PasswordRequired,
-                    passwordTimeout: _secureStore.ConfigData.PasswordTimeout,
+                    passwordTimeoutSecs: _secureStore.ConfigData.PasswordTimeoutSecs,
                     doNotPrompt: _secureStore.ConfigData.DoNotPrompt);
             }
         }

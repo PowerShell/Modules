@@ -1420,11 +1420,10 @@ namespace Microsoft.PowerShell.SecretManagement
                         this));
             }
 
-            int passwordTimeoutMs = (PasswordTimeoutSeconds > 0) ? PasswordTimeoutSeconds * 1000 : PasswordTimeoutSeconds;
             var newConfigData = new SecureStoreConfig(
                 scope: Scope,
                 passwordRequired: RequirePassword,
-                passwordTimeout: passwordTimeoutMs,
+                passwordTimeoutSecs: PasswordTimeoutSeconds,
                 doNotPrompt: DoNotPrompt);
 
             var errorMsg = "";
@@ -1464,7 +1463,7 @@ namespace Microsoft.PowerShell.SecretManagement
 
         [Parameter(Position=2)]
         [ValidateRange(-1, (Int32.MaxValue / 1000))]
-        public int PasswordTimeoutSeconds { get; set; } = 90000;
+        public int PasswordTimeoutSeconds { get; set; } = 900;
 
         [Parameter(Position=3)]
         public SwitchParameter DoNotPrompt { get; set; } = false;
@@ -1487,11 +1486,10 @@ namespace Microsoft.PowerShell.SecretManagement
                 target: "SecretManagement module local store",
                 action: "Erase all secrets in the local store and reset the configuration settings"))
             {
-                int passwordTimeoutMs = (PasswordTimeoutSeconds > 0) ? PasswordTimeoutSeconds * 1000 : PasswordTimeoutSeconds;
                 var newConfig = new SecureStoreConfig(
                     scope: Scope,
                     passwordRequired: RequirePassword,
-                    passwordTimeout: passwordTimeoutMs,
+                    passwordTimeoutSecs: PasswordTimeoutSeconds,
                     doNotPrompt: DoNotPrompt);
 
                 var errorMsg = "";
