@@ -63,7 +63,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 $output
             }
 
-            $customObject = ConvertFrom-Json -InputObject $json -Depth 5
+            $customObject = ConvertFrom-Json -InputObject $json
             return ConvertToHash $customObject
         ";
 
@@ -114,7 +114,7 @@ namespace Microsoft.PowerShell.SecretManagement
         public static PSObject ConvertJsonToPSObject(string json)
         {
             var results = PowerShellInvoker.InvokeScriptCommon<PSObject>(
-                script: @"param ([string] $json) ConvertFrom-Json -InputObject $json -Depth 5",
+                script: @"param ([string] $json) ConvertFrom-Json -InputObject $json",
                 args: new object[] { json },
                 error: out ErrorRecord _);
 
@@ -124,7 +124,7 @@ namespace Microsoft.PowerShell.SecretManagement
         public static string ConvertHashtableToJson(Hashtable hashtable)
         {
             var results = PowerShellInvoker.InvokeScriptCommon<string>(
-                script: @"param ([hashtable] $hashtable) ConvertTo-Json -InputObject $hashtable -Depth 5",
+                script: @"param ([hashtable] $hashtable) ConvertTo-Json -InputObject $hashtable",
                 args: new object[] { hashtable },
                 error: out ErrorRecord _);
 
@@ -417,8 +417,8 @@ namespace Microsoft.PowerShell.SecretManagement
 
     public enum SecureStoreScope
     {
-        Local = 1,
-        Machine
+        CurrentUser = 1,
+        AllUsers
     }
 
     internal sealed class SecureStoreConfig
@@ -437,7 +437,10 @@ namespace Microsoft.PowerShell.SecretManagement
             private set;
         }
 
-        public int PasswordTimeoutSecs
+        /// <Summary>
+        /// Password timeout time in seconds
+        /// </Summary>
+        public int PasswordTimeout
         {
             get;
             private set;
@@ -460,12 +463,12 @@ namespace Microsoft.PowerShell.SecretManagement
         public SecureStoreConfig(
             SecureStoreScope scope,
             bool passwordRequired,
-            int passwordTimeoutSecs,
+            int passwordTimeout,
             bool doNotPrompt)
         {
             Scope = scope;
             PasswordRequired = passwordRequired;
-            PasswordTimeoutSecs = passwordTimeoutSecs;
+            PasswordTimeout = passwordTimeout;
             DoNotPrompt = doNotPrompt;
         }
 
@@ -490,8 +493,8 @@ namespace Microsoft.PowerShell.SecretManagement
                 key: "PasswordRequired",
                 value: PasswordRequired);
             configHashtable.Add(
-                key: "PasswordTimeoutSecs",
-                value: PasswordTimeoutSecs);
+                key: "PasswordTimeout",
+                value: PasswordTimeout);
             configHashtable.Add(
                 key: "DoNotPrompt",
                 value: DoNotPrompt);
@@ -513,7 +516,7 @@ namespace Microsoft.PowerShell.SecretManagement
             dynamic configDataObj = (Utils.ConvertJsonToPSObject(json));
             Scope = (SecureStoreScope) configDataObj.ConfigData.StoreScope;
             PasswordRequired = (bool) configDataObj.ConfigData.PasswordRequired;
-            PasswordTimeoutSecs = (int) configDataObj.ConfigData.PasswordTimeoutSecs;
+            PasswordTimeout = (int) configDataObj.ConfigData.PasswordTimeout;
             DoNotPrompt = (bool) configDataObj.ConfigData.DoNotPrompt;
         }
 
@@ -524,9 +527,9 @@ namespace Microsoft.PowerShell.SecretManagement
         public static SecureStoreConfig GetDefault()
         {
             return new SecureStoreConfig(
-                scope: SecureStoreScope.Local,
+                scope: SecureStoreScope.CurrentUser,
                 passwordRequired: true,
-                passwordTimeoutSecs: 900,    // 15 minute timeout
+                passwordTimeout: 900,
                 doNotPrompt: false);
         }
 
@@ -629,7 +632,7 @@ namespace Microsoft.PowerShell.SecretManagement
             @{
                 StoreScope='LocalScope'
                 PasswordRequired=$true
-                PasswordTimeoutSecs=-1,
+                PasswordTimeout=-1,
                 DoNotPrompt=$false
             }
             MetaData =
@@ -887,12 +890,12 @@ namespace Microsoft.PowerShell.SecretManagement
                 _password = password;
                 if (password != null)
                 {
-                    SetPasswordTimer(_configData.PasswordTimeoutSecs);
+                    SetPasswordTimer(_configData.PasswordTimeout);
                 }
             }
         }
 
-        private void SetPasswordTimer(int timeoutSecs)
+        public void SetPasswordTimer(int timeoutSecs)
         {
             if (_passwordTimer != null)
             {
@@ -1240,9 +1243,9 @@ namespace Microsoft.PowerShell.SecretManagement
                     return false;
                 }
             }
-            else if ((oldConfigData.PasswordTimeoutSecs != newConfigData.PasswordTimeoutSecs) && (_password != null))
+            else if ((oldConfigData.PasswordTimeout != newConfigData.PasswordTimeout) && (_password != null))
             {
-                SetPasswordTimer(newConfigData.PasswordTimeoutSecs);
+                SetPasswordTimer(newConfigData.PasswordTimeout);
             }
 
             return true;
@@ -1574,9 +1577,9 @@ namespace Microsoft.PowerShell.SecretManagement
         private const string StoreFileName = "storefile";
         private const string StoreConfigName = "storeconfig";
 
-        private static readonly string LocalStorePath = Path.Join(Utils.SecretManagementLocalPath, ".localstore");
-        private static readonly string LocalStoreFilePath = Path.Join(LocalStorePath, StoreFileName);
-        private static readonly string LocalConfigFilePath = Path.Join(LocalStorePath, StoreConfigName);
+        private static readonly string LocalStorePath = Path.Combine(Utils.SecretManagementLocalPath, ".localstore");
+        private static readonly string LocalStoreFilePath = Path.Combine(LocalStorePath, StoreFileName);
+        private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, StoreConfigName);
 
         private static readonly FileSystemWatcher _storeFileWatcher;
         private static readonly Timer _updateEventTimer;
@@ -2068,7 +2071,7 @@ namespace Microsoft.PowerShell.SecretManagement
                 return new SecureStoreConfig(
                     scope: _secureStore.ConfigData.Scope,
                     passwordRequired: _secureStore.ConfigData.PasswordRequired,
-                    passwordTimeoutSecs: _secureStore.ConfigData.PasswordTimeoutSecs,
+                    passwordTimeout: _secureStore.ConfigData.PasswordTimeout,
                     doNotPrompt: _secureStore.ConfigData.DoNotPrompt);
             }
         }
@@ -2478,7 +2481,9 @@ namespace Microsoft.PowerShell.SecretManagement
             }
         }
 
-        public void UnlockLocalStore(SecureString password)
+        public void UnlockLocalStore(
+            SecureString password,
+            int? passwordTimeout = null)
         {
             _secureStore.SetPassword(password);
             
@@ -2489,6 +2494,11 @@ namespace Microsoft.PowerShell.SecretManagement
             catch (SecureStorePasswordException)
             {
                 throw new SecureStorePasswordException("Unable to unlock local store. Password is invalid.");
+            }
+
+            if (passwordTimeout.HasValue)
+            {
+                _secureStore.SetPasswordTimer(passwordTimeout.Value);
             }
         }
 
@@ -4352,7 +4362,6 @@ namespace Microsoft.PowerShell.SecretManagement
             finally
             {
                 _powershell.Commands.Clear();
-                _powershell.Runspace.ResetRunspaceState();
             }
 
             return results;
