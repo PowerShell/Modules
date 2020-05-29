@@ -807,13 +807,7 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Properties
 
-        public SecureStoreData Data
-        {
-            get
-            {
-                return _data;
-            }
-        }
+        public SecureStoreData Data => _data;
 
         public SecureStoreConfig ConfigData
         {
