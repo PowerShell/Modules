@@ -809,13 +809,7 @@ namespace Microsoft.PowerShell.SecretManagement
 
         public SecureStoreData Data => _data;
 
-        public SecureStoreConfig ConfigData
-        {
-            get
-            {
-                return _configData;
-            }
-        }
+        public SecureStoreConfig ConfigData => _configData;
 
         internal SecureString Password
         {
