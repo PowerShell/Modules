@@ -1575,7 +1575,7 @@ namespace Microsoft.PowerShell.SecretManagement
         private const string StoreConfigName = "storeconfig";
 
         private static readonly string LocalStorePath = Path.Combine(Utils.SecretManagementLocalPath, ".localstore");
-        private static readonly string LocalStoreFilePath = Path.Combine(LocalStorePath, StoreFileName);
+        private static readonly string LocalStoreFilePath = Path.Join(LocalStorePath, StoreFileName);
         private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, StoreConfigName);
 
         private static readonly FileSystemWatcher _storeFileWatcher;
