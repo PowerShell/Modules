@@ -1576,7 +1576,7 @@ namespace Microsoft.PowerShell.SecretManagement
 
         private static readonly string LocalStorePath = Path.Combine(Utils.SecretManagementLocalPath, ".localstore");
         private static readonly string LocalStoreFilePath = Path.Join(LocalStorePath, StoreFileName);
-        private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, StoreConfigName);
+        private static readonly string LocalConfigFilePath = Path.Join(LocalStorePath, StoreConfigName);
 
         private static readonly FileSystemWatcher _storeFileWatcher;
         private static readonly Timer _updateEventTimer;
