@@ -1467,6 +1467,16 @@ namespace Microsoft.PowerShell.SecretManagement
 
         protected override void BeginProcessing()
         {
+            if (Scope == SecureStoreScope.AllUsers)
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSNotSupportedException("AllUsers scope is not yet supported."),
+                        errorId: "LocalStoreConfigurationNotSupported",
+                        errorCategory: ErrorCategory.NotEnabled,
+                        this));
+            }
+
             WriteWarning("This operation will completely remove all SecretManagement module local store secrets and configuration settings, making any registered vault inoperable.");
         }
 

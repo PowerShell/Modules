@@ -24,8 +24,6 @@ namespace Microsoft.PowerShell.SecretManagement
     {
         #region Members
 
-        private static readonly string LocalLocation;
-        private static readonly string SMLocalPath;
         private const string ConvertJsonToHashtableScript = @"
             param (
                 [string] $json
@@ -73,19 +71,19 @@ namespace Microsoft.PowerShell.SecretManagement
 
         static Utils()
         {
-            var isWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+            IsWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
                 System.Runtime.InteropServices.OSPlatform.Windows);
 
-            if (isWindows)
+            if (IsWindows)
             {
-                LocalLocation = Environment.GetEnvironmentVariable("USERPROFILE");
+                var locationPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                SecretManagementLocalPath = Path.Combine(locationPath, "Microsoft", "PowerShell", "secretmanagement");
             }
             else
             {
-                LocalLocation = Environment.GetEnvironmentVariable("HOME");
+                var locationPath = Environment.GetEnvironmentVariable("HOME");
+                SecretManagementLocalPath = Path.Combine(locationPath, ".secretmanagement");
             }
-
-            SMLocalPath = Path.Combine(LocalLocation, ".secretmanagement");
         }
 
         #endregion
@@ -94,7 +92,14 @@ namespace Microsoft.PowerShell.SecretManagement
 
         public static string SecretManagementLocalPath
         {
-            get { return SMLocalPath; }
+            get;
+            private set;
+        }
+
+        public static bool IsWindows
+        {
+            get;
+            private set;
         }
 
         #endregion
@@ -193,52 +198,44 @@ namespace Microsoft.PowerShell.SecretManagement
             SecureString password1,
             SecureString password2)
         {
-            byte[] data1 = null;
-            byte[] data2 = null;
-            var passwordEqual = false;
+            if (password1.Length != password2.Length)
+            {
+                return false;
+            }
+
+            IntPtr ptrPassword1 = IntPtr.Zero;
+            IntPtr ptrPassword2 = IntPtr.Zero;
             try
             {
-                if (!GetDataFromSecureString(
-                    password1,
-                    out data1))
+                ptrPassword1 = Marshal.SecureStringToCoTaskMemUnicode(password1);
+                ptrPassword2 = Marshal.SecureStringToCoTaskMemUnicode(password2);
+                if (ptrPassword1 != IntPtr.Zero && ptrPassword2 != IntPtr.Zero)
                 {
-                    return false;
-                }
-
-                if (!GetDataFromSecureString(
-                    password2,
-                    out data2))
-                {
-                    return false;
-                }
-
-                passwordEqual = (data1.Length == data2.Length);
-                if (passwordEqual)
-                {
-                    for (int i=0; i<data1.Length; i++)
+                    for (int i=0; i<(password1.Length * 2); i++)
                     {
-                        if (data1[i] != data2[i])
+                        if (Marshal.ReadByte(ptrPassword1, i) != Marshal.ReadByte(ptrPassword2, i))
                         {
-                            passwordEqual = false;
-                            break;
+                            return false;
                         }
                     }
+
+                    return true;
                 }
             }
             finally
             {
-                if (data1 != null)
+                if (ptrPassword1 != IntPtr.Zero)
                 {
-                    CryptoUtils.ZeroOutData(data1);
+                    Marshal.ZeroFreeCoTaskMemUnicode(ptrPassword1);
                 }
 
-                if (data2 != null)
+                if (ptrPassword2 != IntPtr.Zero)
                 {
-                    CryptoUtils.ZeroOutData(data2);
+                    Marshal.ZeroFreeCoTaskMemUnicode(ptrPassword2);
                 }
             }
 
-            return passwordEqual;
+            return false;
         }
 
         public static SecureString PromptForPassword(
@@ -1577,9 +1574,9 @@ namespace Microsoft.PowerShell.SecretManagement
         private const string StoreFileName = "storefile";
         private const string StoreConfigName = "storeconfig";
 
-        private static readonly string LocalStorePath = Path.Combine(Utils.SecretManagementLocalPath, ".localstore");
-        private static readonly string LocalStoreFilePath = Path.Combine(LocalStorePath, StoreFileName);
-        private static readonly string LocalConfigFilePath = Path.Combine(LocalStorePath, StoreConfigName);
+        private static readonly string LocalStorePath;
+        private static readonly string LocalStoreFilePath;
+        private static readonly string LocalConfigFilePath;
 
         private static readonly FileSystemWatcher _storeFileWatcher;
         private static readonly Timer _updateEventTimer;
@@ -1593,8 +1590,13 @@ namespace Microsoft.PowerShell.SecretManagement
 
         static SecureStoreFile()
         {
+            LocalStorePath = Path.Combine(Utils.SecretManagementLocalPath, "localstore");
+            LocalStoreFilePath = Path.Combine(LocalStorePath, StoreFileName);
+            LocalConfigFilePath = Path.Combine(LocalStorePath, StoreConfigName);
+
             if (!Directory.Exists(LocalStorePath))
             {
+                // TODO: Need to specify directory/file permissions.
                 Directory.CreateDirectory(LocalStorePath);
             }
 
@@ -4031,8 +4033,8 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #region Strings
 
-        private static readonly string RegistryDirectoryPath = Path.Combine(Utils.SecretManagementLocalPath, "SecretVaultRegistry");
-        private static readonly string RegistryFilePath = Path.Combine(RegistryDirectoryPath, "VaultInfo");
+        private static readonly string RegistryDirectoryPath = Path.Combine(Utils.SecretManagementLocalPath, "secretvaultregistry");
+        private static readonly string RegistryFilePath = Path.Combine(RegistryDirectoryPath, "vaultinfo");
 
         #endregion
 
@@ -4073,6 +4075,7 @@ namespace Microsoft.PowerShell.SecretManagement
             // Verify path or create.
             if (!Directory.Exists(RegistryDirectoryPath))
             {
+                // TODO: Need to specify directory/file permissions.
                 Directory.CreateDirectory(RegistryDirectoryPath);
             }
 

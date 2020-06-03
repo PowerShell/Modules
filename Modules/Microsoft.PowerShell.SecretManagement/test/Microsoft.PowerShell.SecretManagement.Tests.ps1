@@ -12,7 +12,7 @@ Describe "Test Microsoft.PowerShell.SecretManagement module" -tags CI {
 
         # Reset the local store and configure it for no-password access
         # TODO: This deletes all local store data!!
-        Reset-LocalStore -PasswordRequired:$false -DoNotPrompt -Force
+        Reset-LocalStore -Scope CurrentUser -PasswordRequired:$false -PasswordTimeout: -1 -DoNotPrompt -Force
 
         # Binary extension module
         $classImplementation = @'
@@ -306,6 +306,25 @@ Describe "Test Microsoft.PowerShell.SecretManagement module" -tags CI {
 
         Unregister-SecretVault -Name BinaryTestVault -ErrorAction Ignore
         Unregister-SecretVault -Name ScriptTestVault -ErrorAction Ignore
+    }
+
+    Context "Local store cmdlet tests" {
+
+        It "Verifies local store configuration for tests" {
+            $config = Get-LocalStoreConfiguration
+            $config.Scope | Should -BeExactly "CurrentUser"
+            $config.PasswordRequired | Should -BeFalse
+            $config.PasswordTimeout | Should -Be -1
+            $config.DoNotPrompt | Should -BeTrue
+        }
+
+        It "Verifies local store AllUsers option is not implement" {
+            { Set-LocalStoreConfiguration -Scope AllUsers } | Should -Throw -ErrorId 'LocalStoreConfigurationNotSupported,Microsoft.PowerShell.SecretManagement.SetLocalStoreConfiguration'
+        }
+
+        It "Verifies Unlock-LocalStore throws expected error when in no password mode" {
+            { Unlock-LocalStore -Password None } | Should -Throw -ErrorId 'InvalidOperation,Microsoft.PowerShell.SecretManagement.UnlockLocalStoreCommand'
+        }
     }
 
     Context "Built-in local store errors" {
