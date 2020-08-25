@@ -26,9 +26,17 @@ jobs:
     displayName: 'Capture NuGet package'
 
   - task: NuGetCommand@2
-    displayName: 'Push PSThreadJob artifacts to AzArtifactsFeed'
+    displayName: 'Push PSThreadJob artifacts to AzArtifactFeed'
     inputs:
       command: push
       packagesToPush: '$(System.ArtifactsDirectory)/nupkg/Microsoft.PowerShell.ThreadJob.*.nupkg'
       nuGetFeedType: external
       publishFeedCredentials: AzArtifactFeed
+
+  - task: NuGetCommand@2
+    displayName: 'Push PSThreadJob artifacts from AzArtifactFeed to PSGallery feed'
+    inputs:
+      command: push
+      packagesToPush: '$(System.ArtifactsDirectory)/nupkg/Microsoft.PowerShell.ThreadJob.*.nupkg'
+      nuGetFeedType: external
+      publishFeedCredentials: PHPowerShellGalleryFeed

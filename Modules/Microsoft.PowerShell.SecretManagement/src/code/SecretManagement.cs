@@ -400,16 +400,17 @@ namespace Microsoft.PowerShell.SecretManagement
                 parametersName = ScriptParamTag + vaultName + "_";
 
                 // Store parameters in built-in local secure vault.
-                int errorCode = 0;
-                if (!LocalSecretStore.Instance.WriteObject(
+                string errorMsg = "";
+                if (!LocalSecretStore.GetInstance(cmdlet: this).WriteObject(
                     name: parametersName,
-                    parameters,
-                    ref errorCode))
+                    objectToWrite: parameters,
+                    cmdlet: this,
+                    ref errorMsg))
                 {
                     var msg = string.Format(
                         CultureInfo.InvariantCulture, 
                         "Unable to register vault extension because writing script parameters to the built-in local store failed with error: {0}",
-                        LocalSecretStore.Instance.GetErrorMessage(errorCode));
+                        errorMsg);
 
                     ThrowTerminatingError(
                         new ErrorRecord(
@@ -540,12 +541,14 @@ namespace Microsoft.PowerShell.SecretManagement
                 var parametersName = (string) vaultInfo[ParametersNameKey];
                 if (!string.IsNullOrEmpty(parametersName))
                 {
-                    int errorCode = 0;
-                    if (!LocalSecretStore.Instance.DeleteObject(parametersName, ref errorCode))
+                    string errorMsg = "";
+                    if (!LocalSecretStore.GetInstance(cmdlet: this).DeleteObject(
+                        name: parametersName,
+                        cmdlet: this,
+                        ref errorMsg))
                     {
-                        var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                         var msg = string.Format(CultureInfo.InvariantCulture, 
-                            "Removal of vault info script parameters {0} failed with error {1}", parametersName, errorMessage);
+                            "Removal of vault info script parameters {0} failed with error {1}", parametersName, errorMsg);
                         WriteError(
                             new ErrorRecord(
                                 new PSInvalidOperationException(msg),
@@ -763,11 +766,12 @@ namespace Microsoft.PowerShell.SecretManagement
         private void SearchLocalStore(string name)
         {
             // Search through the built-in local vault.
-            int errorCode = 0;
-            if (LocalSecretStore.Instance.EnumerateObjectInfo(
+            string errorMsg = "";
+            if (LocalSecretStore.GetInstance(cmdlet: this).EnumerateObjectInfo(
                 filter: Name,
                 outSecretInfo: out SecretInformation[] outSecretInfo,
-                errorCode: ref errorCode))
+                cmdlet: this,
+                errorMsg: ref errorMsg))
             {
                 WriteResults(
                     results: outSecretInfo,
@@ -910,7 +914,7 @@ namespace Microsoft.PowerShell.SecretManagement
             {
                 // Write a string secret type only if explicitly requested with the -AsPlainText
                 // parameter switch.  Otherwise return it as a SecureString type.
-                WriteObject(ConvertToSecureString(stringSecret));
+                WriteObject(Utils.ConvertToSecureString(stringSecret));
                 return;
             }
 
@@ -923,22 +927,6 @@ namespace Microsoft.PowerShell.SecretManagement
             }
 
             WriteObject(secret);
-        }
-
-        private SecureString ConvertToSecureString(string secret)
-        {
-            var results = InvokeCommand.InvokeScript(
-                script: @"
-                    param ([string] $secret)
-
-                    ConvertTo-SecureString -String $secret -AsPlainText -Force
-                ",
-                useNewScope: false,
-                writeToPipeline: System.Management.Automation.Runspaces.PipelineResultTypes.None,
-                input: null,
-                args: new object[] { secret });
-            
-            return (results.Count == 1) ? results[0].BaseObject as SecureString : null;
         }
 
         private void WriteNotFoundError()
@@ -954,11 +942,12 @@ namespace Microsoft.PowerShell.SecretManagement
 
         private bool SearchLocalStore(string name)
         {
-            int errorCode = 0;
-            if (LocalSecretStore.Instance.ReadObject(
+            string errorMsg = "";
+            if (LocalSecretStore.GetInstance(cmdlet: this).ReadObject(
                 name: name,
                 outObject: out object outObject,
-                ref errorCode))
+                cmdlet: this,
+                ref errorMsg))
             {
                 WriteSecret(outObject);
                 return true;
@@ -1060,7 +1049,7 @@ namespace Microsoft.PowerShell.SecretManagement
                     if (result != null)
                     {
                         var msg = string.Format(CultureInfo.InvariantCulture, 
-                            "A secret with name {0} already exists in vault {1}", Name, Vault);
+                            "A secret with name {0} already exists in vault {1}.", Name, Vault);
                         ThrowTerminatingError(
                             new ErrorRecord(
                                 new PSInvalidOperationException(msg),
@@ -1081,16 +1070,17 @@ namespace Microsoft.PowerShell.SecretManagement
             }
 
             // Add to default built-in vault (after NoClobber check).
-            int errorCode = 0;
+            string errorMsg = "";
             if (NoClobber)
             {
-                if (LocalSecretStore.Instance.ReadObject(
+                if (LocalSecretStore.GetInstance(cmdlet: this).ReadObject(
                     name: Name,
-                    out object _,
-                    ref errorCode))
+                    outObject: out object _,
+                    cmdlet: this,
+                    ref errorMsg))
                 {
                     var msg = string.Format(CultureInfo.InvariantCulture, 
-                        "A secret with name {0} already exists in the local default vault", Name);
+                        "A secret with name {0} already exists.", Name);
                     ThrowTerminatingError(
                         new ErrorRecord(
                             new PSInvalidOperationException(msg),
@@ -1100,15 +1090,15 @@ namespace Microsoft.PowerShell.SecretManagement
                 }
             }
 
-            errorCode = 0;
-            if (!LocalSecretStore.Instance.WriteObject(
+            errorMsg = "";
+            if (!LocalSecretStore.GetInstance(cmdlet: this).WriteObject(
                 name: Name,
                 objectToWrite: secretToWrite,
-                ref errorCode))
+                cmdlet: this,
+                ref errorMsg))
             {
-                var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                 var msg = string.Format(CultureInfo.InvariantCulture, 
-                    "The secret could not be written to the local default vault.  Error: {0}", errorMessage);
+                    "The secret could not be written to the local default vault.  Error: {0}", errorMsg);
                 ThrowTerminatingError(
                     new ErrorRecord(
                         new PSInvalidOperationException(msg),
@@ -1164,14 +1154,14 @@ namespace Microsoft.PowerShell.SecretManagement
             if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
                 // Remove from local built-in default vault.
-                int errorCode = 0;
-                if (!LocalSecretStore.Instance.DeleteObject(
+                string errorMsg = "";
+                if (!LocalSecretStore.GetInstance(cmdlet: this).DeleteObject(
                     name: Name,
-                    ref errorCode))
+                    cmdlet: this,
+                    errorMsg: ref errorMsg))
                 {
-                    var errorMessage = LocalSecretStore.Instance.GetErrorMessage(errorCode);
                     var msg = string.Format(CultureInfo.InvariantCulture, 
-                        "The secret could not be removed from the local default vault. Error: {0}", errorMessage);
+                        "The secret could not be removed from the local default vault. Error: {0}", errorMsg);
                     ThrowTerminatingError(
                         new ErrorRecord(
                             new PSInvalidOperationException(msg),
@@ -1224,7 +1214,7 @@ namespace Microsoft.PowerShell.SecretManagement
             bool success;
             if (Vault.Equals(RegisterSecretVaultCommand.BuiltInLocalVault, StringComparison.OrdinalIgnoreCase))
             {
-                // TODO: Add test for CredMan, Keyring, etc.
+                // TODO: Add test for SecureStore
                 success = true;
             }
             else
@@ -1246,6 +1236,306 @@ namespace Microsoft.PowerShell.SecretManagement
 
         #endregion
     }
+
+    #endregion
+
+    #region Local store cmdlets
+
+    #region Unlock-LocalStore
+
+    /// <summary>
+    /// Sets the local store password for the current session.
+    /// Password will remain in effect for the session until the timeout expires.
+    /// The password timeout is set in the local store configuration.
+    /// </summary>
+    [Cmdlet(VerbsCommon.Unlock, "LocalStore",
+        DefaultParameterSetName = SecureStringParameterSet)]
+    public sealed class UnlockLocalStoreCommand : PSCmdlet
+    {
+        #region Members
+
+        private const string StringParameterSet = "StringParameterSet";
+        private const string SecureStringParameterSet = "SecureStringParameterSet";
+
+        #endregion
+
+        #region Parameters
+
+        /// <summary>
+        /// Gets or sets a plain text password.
+        /// </summary>
+        [Parameter(ParameterSetName=StringParameterSet)]
+        public string Password { get; set; }
+
+        /// <summary>
+        /// Gets or sets a SecureString password.
+        /// </summary>
+        [Parameter(Mandatory=true, ValueFromPipeline=true, ValueFromPipelineByPropertyName=true, ParameterSetName=SecureStringParameterSet)]
+        public SecureString SecureStringPassword { get; set; }
+
+        [Parameter]
+        public int PasswordTimeout { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            var passwordToSet = (ParameterSetName == StringParameterSet) ? Utils.ConvertToSecureString(Password) : SecureStringPassword;
+            LocalSecretStore.GetInstance(password: passwordToSet).UnlockLocalStore(
+                password: passwordToSet,
+                passwordTimeout: MyInvocation.BoundParameters.ContainsKey(nameof(PasswordTimeout)) ? (int?)PasswordTimeout : null);
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region Update-LocalStorePassword
+
+    /// <summary>
+    /// Updates the local store password to the new password provided.
+    /// </summary>
+    [Cmdlet(VerbsData.Update, "LocalStorePassword")]
+    public sealed class UpdateLocalStorePasswordCommand : PSCmdlet
+    {
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            SecureString newPassword;
+            SecureString oldPassword;
+            oldPassword = Utils.PromptForPassword(
+                cmdlet: this,
+                verifyPassword: false,
+                message: "Old password");
+            newPassword = Utils.PromptForPassword(
+                cmdlet: this,
+                verifyPassword: true,
+                message: "New password");
+
+            LocalSecretStore.GetInstance(password: oldPassword).UpdatePassword(
+                newPassword,
+                oldPassword);
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region Get-LocalStoreConfiguration
+
+    [Cmdlet(VerbsCommon.Get, "LocalStoreConfiguration")]
+    public sealed class GetLocalStoreConfiguration : PSCmdlet
+    {
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            WriteObject(
+                LocalSecretStore.GetInstance(cmdlet: this).Configuration);
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region Set-LocalStoreConfiguration
+
+    [Cmdlet(VerbsCommon.Set, "LocalStoreConfiguration", DefaultParameterSetName = ParameterSet,
+        SupportsShouldProcess = true, ConfirmImpact = ConfirmImpact.High)]
+    public sealed class SetLocalStoreConfiguration : PSCmdlet
+    {
+        #region Members
+
+        private const string ParameterSet = "ParameterSet";
+        private const string DefaultParameterSet = "DefaultParameterSet";
+
+        #endregion
+
+        #region Parameters
+
+        [Parameter(ParameterSetName = ParameterSet)]
+        public SecureStoreScope Scope { get; set; }
+
+        [Parameter(ParameterSetName = ParameterSet)]
+        public SwitchParameter PasswordRequired { get; set; }
+
+        [Parameter(ParameterSetName = ParameterSet)]
+        [ValidateRange(-1, (Int32.MaxValue / 1000))]
+        public int PasswordTimeout { get; set; }
+
+        [Parameter(ParameterSetName = ParameterSet)]
+        public SwitchParameter DoNotPrompt { get; set; }
+
+        [Parameter(ParameterSetName = DefaultParameterSet)]
+        public SwitchParameter Default { get; set; }
+
+        [Parameter]
+        public SwitchParameter Force { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void EndProcessing()
+        {
+            if (Scope == SecureStoreScope.AllUsers)
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSNotSupportedException("AllUsers scope is not yet supported."),
+                        errorId: "LocalStoreConfigurationNotSupported",
+                        errorCategory: ErrorCategory.NotEnabled,
+                        this));
+            }
+
+            if (!Force && !ShouldProcess(
+                target: "SecretManagement module local store",
+                action: "Changes local store configuration"))
+            {
+                return;
+            }
+
+            var oldConfigData = LocalSecretStore.GetInstance(cmdlet: this).Configuration;
+            SecureStoreConfig newConfigData;
+            if (ParameterSetName == ParameterSet)
+            {
+                newConfigData = new SecureStoreConfig(
+                    scope: MyInvocation.BoundParameters.ContainsKey(nameof(Scope)) ? Scope : oldConfigData.Scope,
+                    passwordRequired: MyInvocation.BoundParameters.ContainsKey(nameof(PasswordRequired)) ? (bool)PasswordRequired : oldConfigData.PasswordRequired,
+                    passwordTimeout: MyInvocation.BoundParameters.ContainsKey(nameof(PasswordTimeout)) ? PasswordTimeout : oldConfigData.PasswordTimeout,
+                    doNotPrompt: MyInvocation.BoundParameters.ContainsKey(nameof(DoNotPrompt)) ? (bool)DoNotPrompt : oldConfigData.DoNotPrompt);
+            }
+            else
+            {
+                newConfigData = SecureStoreConfig.GetDefault();
+            }
+
+            var errorMsg = "";
+            if (!LocalSecretStore.GetInstance(cmdlet: this).UpdateConfiguration(
+                newConfigData: newConfigData,
+                cmdlet: this,
+                ref errorMsg))
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSInvalidOperationException(errorMsg),
+                        errorId: "LocalStoreConfigurationUpdateFailed",
+                        errorCategory: ErrorCategory.InvalidOperation,
+                        this));
+            }
+
+            WriteObject(newConfigData);
+        }
+
+        #endregion
+    }
+
+    #endregion
+
+    #region Reset-LocalStore
+
+    [Cmdlet(VerbsCommon.Reset, "LocalStore", 
+        SupportsShouldProcess = true, ConfirmImpact = ConfirmImpact.High)]
+    public sealed class ResetLocalStoreCommand : PSCmdlet
+    {
+        #region Parmeters
+
+        [Parameter]
+        public SecureStoreScope Scope { get; set; }
+
+        [Parameter]
+        public SwitchParameter PasswordRequired { get; set; }
+
+        [Parameter]
+        public int PasswordTimeout { get; set; }
+
+        [Parameter]
+        public SwitchParameter DoNotPrompt { get; set; }
+
+        [Parameter]
+        public SwitchParameter Force { get; set; }
+
+        #endregion
+
+        #region Overrides
+
+        protected override void BeginProcessing()
+        {
+            if (Scope == SecureStoreScope.AllUsers)
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSNotSupportedException("AllUsers scope is not yet supported."),
+                        errorId: "LocalStoreConfigurationNotSupported",
+                        errorCategory: ErrorCategory.NotEnabled,
+                        this));
+            }
+
+            WriteWarning("This operation will completely remove all SecretManagement module local store secrets and configuration settings, making any registered vault inoperable.");
+        }
+
+        protected override void EndProcessing()
+        {
+            if (!Force && !ShouldProcess(
+                target: "SecretManagement module local store",
+                action: "Erase all secrets in the local store and reset the configuration settings"))
+            {
+                return;
+            }
+
+            var errorMsg = "";
+            SecureStoreConfig oldConfigData;
+            if (!SecureStoreFile.ReadConfigFile(
+                configData: out oldConfigData,
+                ref errorMsg))
+            {
+                oldConfigData = SecureStoreConfig.GetDefault();
+            }
+
+            var newConfigData = new SecureStoreConfig(
+                scope: MyInvocation.BoundParameters.ContainsKey(nameof(Scope)) ? Scope : oldConfigData.Scope,
+                passwordRequired: MyInvocation.BoundParameters.ContainsKey(nameof(PasswordRequired)) ? (bool)PasswordRequired : oldConfigData.PasswordRequired,
+                passwordTimeout: MyInvocation.BoundParameters.ContainsKey(nameof(PasswordTimeout)) ? PasswordTimeout : oldConfigData.PasswordTimeout,
+                doNotPrompt: MyInvocation.BoundParameters.ContainsKey(nameof(DoNotPrompt)) ? (bool)DoNotPrompt : oldConfigData.DoNotPrompt);
+
+            if (!SecureStoreFile.RemoveStoreFile(ref errorMsg))
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSInvalidOperationException(errorMsg),
+                        errorId: "ResetLocalStoreCannotRemoveStoreFile",
+                        errorCategory: ErrorCategory.InvalidOperation,
+                        targetObject: this));
+            }
+
+            if (!SecureStoreFile.WriteConfigFile(
+                configData: newConfigData,
+                ref errorMsg))
+            {
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        exception: new PSInvalidOperationException(errorMsg),
+                        errorId: "ResetLocalStoreCannotWriteConfigFile",
+                        errorCategory: ErrorCategory.InvalidOperation,
+                        targetObject: this));
+            }
+
+            LocalSecretStore.Reset();
+
+            WriteObject(newConfigData);
+        }
+
+        #endregion
+    }
+
+
+    #endregion
 
     #endregion
 }

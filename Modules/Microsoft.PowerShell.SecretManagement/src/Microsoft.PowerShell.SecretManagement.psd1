@@ -7,7 +7,7 @@
 RootModule = '.\Microsoft.PowerShell.SecretManagement.dll'
 
 # Version number of this module.
-ModuleVersion = '0.2.1'
+ModuleVersion = '0.3.0'
 
 # Supported PSEditions
 CompatiblePSEditions = @('Core')
@@ -45,6 +45,10 @@ All previous vault extensions will need to be updated.
 *****
 This is an alpha version of the module that currently works only on Windows platforms.
 *****
+
+*****
+Breaking change for 0.3.0: Adding new local secure store that works cross platform.
+*****
 "
 
 # Minimum version of the PowerShell engine required by this module
@@ -58,7 +62,8 @@ FunctionsToExport = @()
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
 CmdletsToExport = @(
-    'Register-SecretVault','Unregister-SecretVault','Get-SecretVault','Set-Secret','Remove-Secret','Get-Secret','Get-SecretInfo','Test-SecretVault')
+    'Register-SecretVault','Unregister-SecretVault','Get-SecretVault','Set-Secret','Remove-Secret','Get-Secret','Get-SecretInfo','Test-SecretVault',
+    'Unlock-LocalStore','Update-LocalStorePassword','Get-LocalStoreConfiguration','Set-LocalStoreConfiguration','Reset-LocalStore')
 
 # Variables to export from this module
 VariablesToExport = '*'
