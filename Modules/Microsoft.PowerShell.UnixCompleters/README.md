@@ -1,4 +1,4 @@
-# PSUnixUtilCompleters
+# Microsoft.PowerShell.UnixCompleters
 
 PowerShell parameter completers for native commands on Linux and macOS.
 
@@ -17,10 +17,10 @@ To enable unix utility completions,
 install this module and add the following to your profile:
 
 ```powershell
-Import-Module PSUnixUtilCompleters
+Import-Module Microsoft.PowerShell.UnixCompleters
 ```
 
-There is also an alternate command, `Import-PSUnixUtilCompleters`,
+There is also an alternate command, `Import-UnixCompleters`,
 that has the same functionality but is discoverable by command completion.
 
 This will register argument completers for all native commands
@@ -30,7 +30,7 @@ Given the nature of native completion results,
 you may find this works best with PSReadLine's MenuComplete mode:
 
 ```powershell
-Import-Module PSUnixUtilCompleters
+Import-Module Microsoft.PowerShell.UnixCompleters
 
 Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
 ```
@@ -46,7 +46,7 @@ $env:COMPLETION_SHELL_PREFERENCE = 'bash'
 
 $env:COMPLETION_SHELL_PREFERENCE = '/bin/bash'
 
-Import-Module PSUnixUtilCompleters
+Import-Module Microsoft.PowerShell.UnixCompleters
 ```
 
 Note that you must do this before you load the module,
@@ -56,42 +56,42 @@ If you want to change the completer after loading,
 you can do so from PowerShell like so:
 
 ```powershell
-Set-PSUnixUtilCompleter -ShellType Zsh
+Set-UnixCompleter -ShellType Zsh
 
 # Or if you have a shell installed to a particular path
-Set-PSUnixUtilCompleter -Shell "/bin/zsh"
+Set-UnixCompleter -Shell "/bin/zsh"
 
 # You can even write your own utility completer by implementing `IUnixUtilCompleter`
 $myCompleter = [MyCompleter]::new()
-Set-PSUnixUtilCompleter -Completer $myCompleter
+Set-UnixCompleter -Completer $myCompleter
 ```
 
 ## Unregistering UNIX util completions
 
-The PSUnixUtilCompleters module will unregister completers
+The Microsoft.PowerShell.UnixCompleters module will unregister completers
 for all the commands it registered completers for
 when removed:
 
 ```powershell
-Remove-Module PSUnixUtilCompleters
+Remove-Module Microsoft.PowerShell.UnixCompleters
 ```
 
 As with loading, there is also a convenience command provided for this:
 
 ```powershell
-Remove-PSUnixUtilCompleters
+Remove-UnixCompleters
 ```
 
 ## Building the module yourself
 
-PSUnixUtilCompleters comes with a PowerShell build script,
+Microsoft.PowerShell.UnixCompleters comes with a PowerShell build script,
 which you can invoke to build the module yourself with:
 
 ```powershell
 ./build.ps1 -Clean
 ```
 
-This will output the built module to `out/PSUnixUtilCompleters`.
+This will output the built module to `out/Microsoft.PowerShell.UnixCompleters`.
 
 ## Credits
 
